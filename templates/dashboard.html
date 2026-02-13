@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ICMP AI Network Monitoring</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <div class="header">
+        <h2>🧠 AI-Driven ICMP Network Monitoring & IDS</h2>
+    </div>
+
+    <div class="main-dashboard">
+        <div class="status-row">
+            <div id="statusBox" class="alert-box success">Network Status: Normal</div>
+            <div id="ttlBox" class="ttl-box success">TTL Status: Normal</div>
+        </div>
+
+        <div class="speed-container">
+            <div class="speed-card">
+                <span class="label">Download</span>
+                <span id="downloadSpeed" class="value">0</span> <span class="unit">Mbps</span>
+            </div>
+            <div class="speed-card">
+                <span class="label">Upload</span>
+                <span id="uploadSpeed" class="value">0</span> <span class="unit">Mbps</span>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-container"><canvas id="rttChart"></canvas></div>
+            <div class="chart-container"><canvas id="lossChart"></canvas></div>
+            <div class="chart-container"><canvas id="rateChart"></canvas></div>
+            <div class="chart-container"><canvas id="ttlChart"></canvas></div>
+        </div>
+
+        <div class="log-section">
+            <h3>🛡️ Recent Security Events</h3>
+            <table id="logTable">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Event</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="logBody">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+</body>

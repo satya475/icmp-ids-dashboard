@@ -1,0 +1,97 @@
+/* --- Base Styles --- */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #0f172a; /* Deep Navy Dark Mode */
+    color: #e2e8f0;
+    margin: 0;
+    padding: 20px;
+}
+
+h2 {
+    text-align: center;
+    color: #38bdf8;
+    margin-bottom: 30px;
+}
+
+/* --- Status & Speed Row --- */
+.status-row, .speed-container {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.alert-box, .ttl-box, .speed-card {
+    padding: 20px;
+    border-radius: 12px;
+    min-width: 200px;
+    text-align: center;
+    font-weight: bold;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    transition: background 0.5s ease;
+}
+
+/* --- State Colors --- */
+.success { background-color: #059669; } /* Emerald Green */
+.warning { background-color: #d97706; } /* Amber Orange */
+.danger  { background-color: #dc2626; } /* Red */
+
+/* --- Speed Cards --- */
+.speed-card {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+}
+
+.speed-card .label { display: block; font-size: 0.8rem; color: #94a3b8; }
+.speed-card .value { font-size: 1.5rem; color: #38bdf8; }
+.speed-card .unit  { font-size: 0.9rem; }
+
+/* --- Charts Grid --- */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 25px;
+    margin-top: 20px;
+}
+
+.chart-container {
+    background-color: #1e293b;
+    padding: 15px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+}
+
+canvas {
+    max-width: 100% !important;
+    height: auto !important;
+}
+
+/* --- Log Table Section --- */
+.log-section {
+    margin-top: 40px;
+    background-color: #1e293b;
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid #334155;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th, td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #334155;
+}
+
+th { color: #38bdf8; text-transform: uppercase; font-size: 0.8rem; }
+td { font-size: 0.9rem; }
+
+/* --- Responsive Adjustments --- */
+@media (max-width: 600px) {
+    .status-row, .speed-container { flex-direction: column; }
+    .charts-grid { grid-template-columns: 1fr; }
+}
