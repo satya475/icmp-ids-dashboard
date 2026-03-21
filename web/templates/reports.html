@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Reports & Alerts</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<style>
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.section-title{font-size:13px;font-weight:600;margin-bottom:14px;
+  padding-bottom:8px;border-bottom:1px solid var(--border)}
+.form-group{margin-bottom:14px}
+.form-label{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.06em;margin-bottom:6px;display:block}
+.form-input{width:100%;background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);padding:8px 12px;border-radius:6px;font-size:13px;outline:none}
+.form-input:focus{border-color:var(--blue)}
+.form-input[type="password"]{letter-spacing:2px}
+.status-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;
+  border-radius:20px;font-size:11px;font-weight:600}
+.sb-on{background:rgba(34,197,94,.15);color:var(--up)}
+.sb-off{background:rgba(100,116,139,.15);color:var(--unknown)}
+.report-card{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:20px 24px}
+.report-btn{display:flex;align-items:center;gap:10px;padding:14px 18px;
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  cursor:pointer;transition:all .15s;text-decoration:none;color:var(--text)}
+.report-btn:hover{border-color:var(--blue);background:rgba(59,130,246,.05)}
+.report-icon{width:36px;height:36px;border-radius:8px;display:flex;
+  align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.ri-daily{background:rgba(59,130,246,.15)}
+.ri-weekly{background:rgba(34,197,94,.15)}
+.report-label{font-weight:500;font-size:13px}
+.report-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.msg{padding:10px 14px;border-radius:6px;font-size:12px;margin-top:12px;display:none}
+.msg-ok{background:rgba(34,197,94,.1);color:var(--up);border:1px solid rgba(34,197,94,.2)}
+.msg-err{background:rgba(239,68,68,.1);color:var(--down);border:1px solid rgba(239,68,68,.2)}
+.threshold-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot-on{background:var(--up)}.dot-off{background:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <a href="/" class="nav-link">← Dashboard</a>
+    Reports & Alerts
+  </h1>
+  <span id="last-update" style="font-size:11px;color:var(--muted)"></span>
+</header>
+
+<div class="main">
+
+  <!-- Summary stats -->
+  <div class="stats">
+    <div class="stat"><div class="lbl">Total Alerts Sent</div>
+      <div class="val c-blue" id="s-total">—</div></div>
+    <div class="stat"><div class="lbl">Email Status</div>
+      <div style="margin-top:6px" id="s-email">
+        <span class="status-badge sb-off">
+          <span class="dot dot-off"></span> Checking...
+        </span>
+      </div>
+    </div>
+    <div class="stat"><div class="lbl">RTT Threshold</div>
+      <div class="val c-warn" id="s-rtt-threshold">200 ms</div></div>
+  </div>
+
+  <!-- Reports -->
+  <div class="report-card">
+    <div class="section-title">Download Reports</div>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:16px">
+      PDF reports include device uptime, RTT history, alert log, and bandwidth usage.
+    </p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <a href="/api/report/daily" class="report-btn" style="flex:1;min-width:200px">
+        <div class="report-icon ri-daily">D</div>
+        <div>
+          <div class="report-label">Daily Report</div>
+          <div class="report-sub">Last 24 hours of data</div>
+        </div>
+      </a>
+      <a href="/api/report/weekly" class="report-btn" style="flex:1;min-width:200px">
+        <div class="report-icon ri-weekly">W</div>
+        <div>
+          <div class="report-label">Weekly Report</div>
+          <div class="report-sub">Last 7 days of data</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <!-- Email alert config -->
+  <div class="report-card">
+    <div class="section-title">Email Alert Configuration</div>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:16px">
+      Alerts fire when a device goes DOWN or RTT exceeds the threshold.
+      Settings are saved to your <code style="font-size:11px;background:var(--surface2);
+      padding:1px 6px;border-radius:4px">.env</code> file.
+    </p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="form-group">
+          <label class="form-label">From email (Gmail recommended)</label>
+          <input class="form-input" id="email-from" type="email"
+            placeholder="your@gmail.com"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">To email (alert recipient)</label>
+          <input class="form-input" id="email-to" type="email"
+            placeholder="alerts@gmail.com"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">App password</label>
+          <input class="form-input" id="email-pass" type="password"
+            placeholder="Gmail app password (not your login password)"/>
+        </div>
+      </div>
+      <div>
+        <div class="form-group">
+          <label class="form-label">SMTP server</label>
+          <input class="form-input" id="email-smtp" type="text"
+            value="smtp.gmail.com"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">SMTP port</label>
+          <input class="form-input" id="email-port" type="number" value="587"/>
+        </div>
+        <div class="threshold-row">
+          <div class="form-group">
+            <label class="form-label">RTT alert threshold (ms)</label>
+            <input class="form-input" id="rtt-threshold" type="number"
+              value="200" min="50" max="5000"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cooldown (minutes)</label>
+            <input class="form-input" id="cooldown" type="number"
+              value="10" min="1" max="60"/>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-start" style="margin-top:4px" onclick="saveConfig()">
+      Save & Test Connection
+    </button>
+    <div class="msg" id="config-msg"></div>
+
+    <div style="margin-top:16px;padding:12px 14px;background:var(--surface2);
+                border-radius:8px;border:1px solid var(--border)">
+      <p style="font-size:11px;color:var(--muted);margin:0;line-height:1.8">
+        <b style="color:var(--text)">Gmail setup:</b> Go to
+        <b>Google Account → Security → 2-Step Verification → App passwords</b>.
+        Generate a password for "Mail" and paste it above.
+        Never use your regular Gmail password here.
+      </p>
+    </div>
+  </div>
+
+  <!-- Alert history -->
+  <div class="report-card">
+    <div class="section-title">Recent Alert History</div>
+    <table>
+      <thead><tr>
+        <th>Time</th><th>Device</th><th>IP</th><th>Change</th>
+      </tr></thead>
+      <tbody id="alert-tbody">
+        <tr><td colspan="4" class="empty">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+const api = url => fetch(url).then(r => r.json());
+const SC  = {UP:'#22c55e',DOWN:'#ef4444',DEGRADED:'#f59e0b',UNKNOWN:'#64748b'};
+
+async function loadConfig(){
+  try{
+    const c=await api('/api/alerts/config');
+    if(c.email_from) document.getElementById('email-from').value=c.email_from;
+    if(c.email_to)   document.getElementById('email-to').value=c.email_to;
+    if(c.smtp)       document.getElementById('email-smtp').value=c.smtp;
+    const emailEl=document.getElementById('s-email');
+    if(c.email_enabled){
+      emailEl.innerHTML='<span class="status-badge sb-on"><span class="dot dot-on"></span> Configured</span>';
+    } else {
+      emailEl.innerHTML='<span class="status-badge sb-off"><span class="dot dot-off"></span> Not configured</span>';
+    }
+  }catch(e){}
+}
+
+async function loadAlerts(){
+  const alerts=await api('/api/alerts');
+  document.getElementById('s-total').textContent=alerts.length;
+  const tb=document.getElementById('alert-tbody');
+  if(!alerts.length){
+    tb.innerHTML='<tr><td colspan="4" class="empty">No alerts recorded yet</td></tr>';
+    return;
+  }
+  tb.innerHTML=alerts.slice(0,30).map(a=>{
+    const ts=new Date(a.timestamp).toLocaleString();
+    const color=SC[a.new_status]||SC.UNKNOWN;
+    return `<tr>
+      <td class="muted" style="font-size:11px">${ts}</td>
+      <td style="font-weight:500">${a.name}</td>
+      <td style="font-family:monospace;color:var(--muted);font-size:11px">${a.host}</td>
+      <td><span style="color:${color};font-weight:600">${a.old_status||'—'} → ${a.new_status}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+async function saveConfig(){
+  const from  = document.getElementById('email-from').value.trim();
+  const to    = document.getElementById('email-to').value.trim();
+  const pass  = document.getElementById('email-pass').value;
+  const smtp  = document.getElementById('email-smtp').value.trim();
+  const port  = document.getElementById('email-port').value;
+  const rtt   = document.getElementById('rtt-threshold').value;
+  const cool  = document.getElementById('cooldown').value;
+  const msg   = document.getElementById('config-msg');
+
+  if(!from||!to||!pass){
+    msg.className='msg msg-err';
+    msg.style.display='block';
+    msg.textContent='Please fill in From email, To email, and App password.';
+    return;
+  }
+
+  try{
+    const r=await fetch('/api/alerts/save',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from,to,password:pass,smtp,port,rtt_threshold:rtt,cooldown:cool})
+    }).then(r=>r.json());
+
+    msg.style.display='block';
+    if(r.ok){
+      msg.className='msg msg-ok';
+      msg.textContent=r.msg;
+      loadConfig();
+    } else {
+      msg.className='msg msg-err';
+      msg.textContent=r.msg||'Failed to save configuration.';
+    }
+  }catch(e){
+    msg.className='msg msg-err';
+    msg.style.display='block';
+    msg.textContent='Error saving configuration: '+e.message;
+  }
+}
+
+loadConfig();
+loadAlerts();
+document.getElementById('last-update').textContent='Updated '+new Date().toLocaleTimeString();
+</script>
+</body>
+</html>

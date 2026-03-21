@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AI Insights</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+.insights-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.insight-card{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:18px;position:relative;overflow:hidden}
+.insight-card::before{content:'';position:absolute;top:0;left:0;right:0;
+  height:3px}
+.ic-critical::before{background:var(--down)}
+.ic-high::before{background:var(--warn)}
+.ic-medium::before{background:var(--blue)}
+.ic-normal::before{background:var(--up)}
+.ic-info::before{background:var(--muted)}
+.insight-type{font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);margin-bottom:6px}
+.insight-title{font-size:14px;font-weight:500;margin-bottom:8px}
+.insight-body{font-size:12px;color:var(--muted);line-height:1.7}
+.insight-value{font-size:28px;font-weight:700;margin:8px 0}
+.sev-critical{color:var(--down)}
+.sev-high{color:var(--warn)}
+.sev-medium{color:var(--blue)}
+.sev-normal{color:var(--up)}
+.anomaly-list{display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto}
+.anomaly-item{display:flex;gap:10px;padding:10px 12px;border-radius:8px;
+  background:var(--surface2);border:1px solid var(--border)}
+.sev-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.dot-critical{background:var(--down)}
+.dot-high{background:var(--warn)}
+.dot-medium{background:var(--blue)}
+.a-msg{font-size:12px;color:var(--text);line-height:1.5}
+.a-meta{font-size:10px;color:var(--muted);margin-top:3px}
+.device-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.device-chip{background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px}
+.type-icon{width:32px;height:32px;border-radius:6px;display:flex;
+  align-items:center;justify-content:center;font-size:13px;font-weight:700;
+  flex-shrink:0}
+.device-name{font-size:12px;font-weight:500;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.device-type{font-size:10px;color:var(--muted)}
+.device-conf{font-size:10px;color:var(--muted)}
+.chart-wrap{height:180px;position:relative}
+.summary-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.summary-stat{text-align:center;padding:10px 16px;background:var(--surface2);
+  border-radius:8px;min-width:80px}
+.summary-stat .n{font-size:22px;font-weight:700}
+.summary-stat .l{font-size:10px;color:var(--muted);text-transform:uppercase}
+.recommendation-box{padding:16px 20px;border-radius:10px;
+  background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);
+  margin-bottom:16px}
+.empty{color:var(--muted);font-size:12px;padding:16px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <a href="/" class="nav-link">← Dashboard</a>
+    AI Insights
+  </h1>
+  <span id="last-update" style="font-size:11px;color:var(--muted)"></span>
+</header>
+
+<div class="main">
+
+  <!-- Summary bar -->
+  <div class="card">
+    <div class="ch">Network Intelligence Summary</div>
+    <div class="cb">
+      <div class="summary-row" id="summary-row">
+        <div class="summary-stat">
+          <div class="n" id="sum-anomalies">—</div>
+          <div class="l">Anomalies (24h)</div>
+        </div>
+        <div class="summary-stat">
+          <div class="n sev-critical" id="sum-critical">—</div>
+          <div class="l">Critical</div>
+        </div>
+        <div class="summary-stat">
+          <div class="n sev-high" id="sum-high">—</div>
+          <div class="l">High</div>
+        </div>
+        <div class="summary-stat">
+          <div class="n" id="sum-devices">—</div>
+          <div class="l">Devices classified</div>
+        </div>
+        <div class="summary-stat">
+          <div class="n sev-normal" id="sum-health">—</div>
+          <div class="l">Network health</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Router recommendation -->
+  <div class="card">
+    <div class="ch">Router Recommendation
+      <span class="muted" style="font-weight:400;font-size:10px">
+        Based on all recorded sessions
+      </span>
+    </div>
+    <div class="cb" id="recommendation-box">
+      <div class="empty">Collecting session data — use each router for 5+ minutes</div>
+    </div>
+  </div>
+
+  <!-- Anomaly feed + anomaly chart -->
+  <div class="row row-2">
+    <div class="card">
+      <div class="ch">Live Anomaly Feed
+        <span class="muted" style="font-weight:400;font-size:10px">Last 24 hours</span>
+      </div>
+      <div class="cb">
+        <div class="anomaly-list" id="anomaly-list">
+          <div class="empty">No anomalies detected yet — monitoring in progress</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch">Anomaly Distribution</div>
+      <div class="cb">
+        <div class="chart-wrap"><canvas id="anomaly-chart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Device classification -->
+  <div class="card">
+    <div class="ch">Device Classification
+      <span class="muted" style="font-weight:400;font-size:10px">
+        AI-detected device types based on behavior
+      </span>
+    </div>
+    <div class="cb">
+      <div class="device-grid" id="device-grid">
+        <div class="empty">Classifier is learning — check back in 5 minutes</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Predictive insights -->
+  <div class="card">
+    <div class="ch">Predictive Alerts
+      <span class="muted" style="font-weight:400;font-size:10px">
+        Devices trending toward problems
+      </span>
+    </div>
+    <div class="cb">
+      <div id="predictions-list">
+        <div class="empty">No predictions yet — need 10+ minutes of RTT data per device</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const api = url => fetch(url).then(r=>r.json());
+let anomalyChart=null;
+
+const SEV_COLORS={critical:'#ef4444',high:'#f59e0b',medium:'#3b82f6'};
+const TYPE_META={
+  router:  {color:'#3b82f6',label:'Router'},
+  server:  {color:'#22c55e',label:'Server'},
+  laptop:  {color:'#a855f7',label:'Laptop'},
+  phone:   {color:'#f59e0b',label:'Phone'},
+  iot:     {color:'#06b6d4',label:'IoT'},
+  tv:      {color:'#f97316',label:'TV'},
+  printer: {color:'#64748b',label:'Printer'},
+  unknown: {color:'#374151',label:'Unknown'},
+};
+
+// ── Summary ──────────────────────────────
+async function updateSummary(){
+  const [summary, classifications, health] = await Promise.all([
+    api('/api/anomalies/summary'),
+    api('/api/classify'),
+    api('/api/health/current'),
+  ]);
+  document.getElementById('sum-anomalies').textContent=summary.total||0;
+  document.getElementById('sum-critical').textContent=
+    summary.by_severity?.critical||0;
+  document.getElementById('sum-high').textContent=
+    summary.by_severity?.high||0;
+  document.getElementById('sum-devices').textContent=
+    Object.keys(classifications).length;
+  const score=health?.latest?.health_score;
+  document.getElementById('sum-health').textContent=
+    score!=null?Math.round(score)+'/100':'—';
+}
+
+// ── Recommendation ───────────────────────
+async function updateRecommendation(){
+  const r=await api('/api/health/recommendation');
+  const el=document.getElementById('recommendation-box');
+  if(!r?.recommendation){
+    el.innerHTML=`<div class="empty">${
+      (r?.reasoning||['Collecting data...']).join(' ')}</div>`;
+    return;
+  }
+  const confColor=r.confidence>=80?'var(--up)':
+                  r.confidence>=60?'var(--warn)':'var(--muted)';
+  el.innerHTML=`
+    <div class="recommendation-box">
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px">
+        Recommended: <span style="color:var(--blue)">${r.best_label}</span>
+        <span style="font-size:11px;font-weight:400;color:${confColor};
+          margin-left:10px">${r.confidence}% confidence</span>
+      </div>
+      ${r.reasoning.map(x=>`
+        <div style="display:flex;gap:8px;font-size:12px;
+                    color:var(--muted);margin-bottom:4px">
+          <span style="color:var(--up)">✓</span>${x}
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      ${(r.sessions||[]).map(s=>`
+        <div style="background:var(--surface2);border:1px solid ${
+          s.gateway===r.recommendation?'var(--blue)':'var(--border)'};
+          border-radius:8px;padding:12px 16px;text-align:center;min-width:120px">
+          <div style="font-size:11px;font-weight:600;margin-bottom:6px;
+            color:${s.gateway===r.recommendation?'var(--blue)':'var(--text)'}">
+            ${s.label}</div>
+          <div style="font-size:24px;font-weight:700;color:${
+            s.overall>=80?'#22c55e':s.overall>=60?'#f59e0b':'#ef4444'}">
+            ${Math.round(s.overall)}</div>
+          <div style="font-size:10px;color:var(--muted)">/100</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── Anomaly feed ─────────────────────────
+async function updateAnomalies(){
+  const events=await api('/api/anomalies');
+  const el=document.getElementById('anomaly-list');
+  if(!events.length){
+    el.innerHTML='<div class="empty">No anomalies in last 24h — network looks healthy</div>';
+    return;
+  }
+  el.innerHTML=events.slice(0,20).map(e=>{
+    const ts=new Date(e.timestamp).toLocaleTimeString();
+    const dotClass=`dot-${e.severity||'medium'}`;
+    return `<div class="anomaly-item">
+      <div class="sev-dot ${dotClass}"></div>
+      <div>
+        <div class="a-msg">${e.message}</div>
+        <div class="a-meta">${e.name} · ${ts} · ${e.anomaly_type}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Anomaly chart ─────────────────────────
+async function updateAnomalyChart(){
+  const summary=await api('/api/anomalies/summary');
+  const byType =summary.by_type||{};
+  const labels =Object.keys(byType);
+  const values =Object.values(byType);
+
+  if(!anomalyChart){
+    anomalyChart=new Chart(
+      document.getElementById('anomaly-chart').getContext('2d'),{
+      type:'doughnut',
+      data:{labels,datasets:[{
+        data:values,
+        backgroundColor:['#3b82f6','#f59e0b','#22c55e','#ef4444','#a855f7'],
+        borderWidth:0,
+      }]},
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{
+            position:'right',
+            labels:{color:'#e2e8f0',font:{size:11},boxWidth:12}
+          }
+        }
+      }
+    });
+  } else {
+    anomalyChart.data.labels=labels;
+    anomalyChart.data.datasets[0].data=values;
+    anomalyChart.update('none');
+  }
+}
+
+// ── Device classification ─────────────────
+async function updateDevices(){
+  const cls=await api('/api/classify');
+  const el=document.getElementById('device-grid');
+  const entries=Object.entries(cls);
+  if(!entries.length){
+    el.innerHTML='<div class="empty">Classifier learning — check back in 5 minutes</div>';
+    return;
+  }
+  // Sort: known types first, unknown last
+  entries.sort((a,b)=>{
+    if(a[1].device_type==='unknown'&&b[1].device_type!=='unknown') return 1;
+    if(b[1].device_type==='unknown'&&a[1].device_type!=='unknown') return -1;
+    return b[1].confidence-a[1].confidence;
+  });
+  el.innerHTML=entries.map(([ip,info])=>{
+    const meta=TYPE_META[info.device_type]||TYPE_META.unknown;
+    const conf=Math.round(info.confidence||0);
+    return `<div class="device-chip">
+      <div class="type-icon" style="background:${meta.color}22;color:${meta.color}">
+        ${meta.label[0]}
+      </div>
+      <div style="min-width:0">
+        <div class="device-name" title="${ip}">${ip}</div>
+        <div class="device-type">${meta.label}</div>
+        <div class="device-conf">${conf>0?conf+'% confidence':'learning...'}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Predictions ───────────────────────────
+async function updatePredictions(){
+  const anomalies=await api('/api/anomalies');
+  const preds=anomalies.filter(a=>a.anomaly_type==='rtt_prediction');
+  const el=document.getElementById('predictions-list');
+  if(!preds.length){
+    el.innerHTML='<div class="empty">No degradation predicted — all devices trending normally</div>';
+    return;
+  }
+  el.innerHTML=`<div class="anomaly-list">`+
+    preds.slice(0,10).map(p=>`
+      <div class="anomaly-item">
+        <div class="sev-dot dot-${p.severity||'medium'}"></div>
+        <div>
+          <div class="a-msg">${p.message}</div>
+          <div class="a-meta">${p.name} · ${new Date(p.timestamp).toLocaleTimeString()}</div>
+        </div>
+      </div>`).join('')+
+    `</div>`;
+}
+
+// ── Refresh ───────────────────────────────
+async function refresh(){
+  await Promise.all([
+    updateSummary(),
+    updateRecommendation(),
+    updateAnomalies(),
+    updateAnomalyChart(),
+    updateDevices(),
+    updatePredictions(),
+  ]);
+  document.getElementById('last-update').textContent=
+    'Updated '+new Date().toLocaleTimeString();
+}
+refresh();
+setInterval(refresh,10000);
+</script>
+</body>
+</html>

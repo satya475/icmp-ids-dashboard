@@ -1,0 +1,7 @@
+flask>=2.3.0
+icmplib>=3.0.0
+scapy>=2.5.0
+colorama>=0.4.6
+psutil>=5.9.0
+python-dotenv>=1.0.0
+reportlab>=4.0.0

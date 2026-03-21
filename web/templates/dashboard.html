@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Network Monitor</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.control-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.control-top{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.control-left{padding:20px 24px;border-right:1px solid var(--border)}
+.control-right{padding:20px 24px}
+.control-title{font-size:13px;font-weight:600;margin-bottom:14px}
+.input-row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.ip-input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:8px 12px;border-radius:6px;font-size:13px;font-family:monospace;outline:none}
+.ip-input:focus{border-color:var(--blue)}
+.status-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.proc-badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
+.pb-running{background:rgba(34,197,94,.15);color:var(--up)}
+.pb-stopped{background:rgba(100,116,139,.15);color:var(--unknown)}
+.log-window{background:#0a0c14;border-top:1px solid var(--border);
+  font-family:monospace;font-size:11px;height:180px;overflow-y:auto;padding:10px 14px}
+.log-line{display:flex;gap:8px;line-height:1.7}
+.log-ts{color:#374151;flex-shrink:0}
+.log-src-discovery{color:#3b82f6}.log-src-probe{color:#22c55e}
+.log-src-system{color:#f59e0b}.log-src-error{color:#ef4444}
+.log-msg{color:#9ca3af}
+#topo-wrap{width:100%;height:360px}
+#topo-svg{width:100%;height:100%}
+.a-item{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}
+.a-item:last-child{border-bottom:none}
+.a-dot{width:7px;height:7px;border-radius:50%;margin-top:3px;flex-shrink:0}
+.d-up{background:var(--up)}.d-down{background:var(--down)}.d-deg{background:var(--warn)}.d-unk{background:var(--unknown)}
+.a-name{font-weight:500;font-size:12px}
+.a-sub{font-size:10px;color:var(--muted);margin-top:1px}
+.alert-scroll{max-height:360px;overflow-y:auto}
+</style>
+</head>
+<body>
+<div id="tooltip"><div class="tt-name" id="tt-name"></div><div id="tt-body"></div></div>
+<header>
+  <h1><span class="dot-live"></span> Network Monitor
+    <span id="net-badge" style="font-size:11px;font-weight:400;
+      background:var(--surface2);border:1px solid var(--border);
+      padding:2px 10px;border-radius:20px;margin-left:8px;
+      font-family:monospace;color:var(--muted)">detecting...</span>
+  </h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <a href="/bandwidth" class="nav-link">Bandwidth →</a>
+    <a href="/reports" class="nav-link">Reports →</a>
+    <a href="/health" class="nav-link">Health →</a>
+    <a href="/insights" class="nav-link">AI Insights →</a>
+    <span id="last-update" style="font-size:11px;color:var(--muted)">Loading...</span>
+  </div>
+</header>
+<div class="main">
+  <div class="control-panel">
+    <div class="control-top">
+      <div class="control-left">
+        <div class="control-title">Monitor Control</div>
+        <div class="input-row">
+          <input class="ip-input" id="router-ip" type="text"
+          placeholder="Detecting your router..."
+          oninput="clearIpError()"/>
+          <button class="btn btn-start" id="btn-start" onclick="startMonitor()">Start</button>
+          <button class="btn btn-stop"  id="btn-stop"  onclick="stopMonitor()" disabled>Stop</button>
+        </div>
+        <div id="ip-error" style="display:none;font-size:11px;padding:6px 10px;
+          border-radius:6px;margin-bottom:8px;background:rgba(239,68,68,.1);
+          color:var(--down);border:1px solid rgba(239,68,68,.2)"></div>
+        <div id="ip-warning" style="display:none;font-size:11px;padding:6px 10px;
+          border-radius:6px;margin-bottom:8px;background:rgba(245,158,11,.1);
+          color:var(--warn);border:1px solid rgba(245,158,11,.2)"></div>
+        <div class="status-row">
+          <span>Status:</span>
+          <span class="proc-badge pb-stopped" id="badge-discovery">Discovery: stopped</span>
+          <span class="proc-badge pb-stopped" id="badge-probe">Probe: stopped</span>
+          <span class="proc-badge pb-stopped" id="badge-traceroute">Traceroute: stopped</span>
+        </div>
+      </div>
+      <div class="control-right">
+        <div class="control-title">Current Network</div>
+        <div id="network-info-box" style="font-size:12px;line-height:2;color:var(--muted)">
+          Detecting network...
+        </div>
+      </div>
+    </div>
+    <div class="log-window" id="log-window">
+      <div class="log-line">
+        <span class="log-ts">--:--:--</span>
+        <span class="log-src-system">system    </span>
+        <span class="log-msg">Dashboard ready. Enter your router IP and click Start.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="lbl">Total Devices</div><div class="val c-blue" id="s-total">—</div></div>
+    <div class="stat"><div class="lbl">Online</div><div class="val c-up" id="s-up">—</div></div>
+    <div class="stat"><div class="lbl">Offline</div><div class="val c-down" id="s-down">—</div></div>
+    <div class="stat"><div class="lbl">Unknown</div><div class="val c-warn" id="s-unknown">—</div></div>
+    <div class="stat"><div class="lbl">Avg RTT</div><div class="val" id="s-rtt">—</div></div>
+  </div>
+
+  <div class="row row-73">
+    <div class="card">
+      <div class="ch">Topology Map <span class="muted" style="font-weight:400;font-size:10px">Hover for details</span></div>
+      <div id="topo-wrap"><svg id="topo-svg"></svg></div>
+    </div>
+    <div class="card">
+      <div class="ch">Alert History</div>
+      <div class="alert-scroll" id="alert-list"><div class="empty">No alerts yet</div></div>
+    </div>
+  </div>
+
+  <!-- Real-time activity feed -->
+  <div class="card">
+    <div class="ch">
+      Live Activity
+      <span class="muted" style="font-weight:400;font-size:10px">
+        Last 5 minutes · auto-updates
+      </span>
+    </div>
+    <div id="activity-feed" style="max-height:140px;overflow-y:auto;padding:8px 0">
+      <div style="color:var(--muted);font-size:12px;padding:8px 16px">
+        Monitoring for activity...
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ch">Devices <span class="muted" style="font-weight:400;font-size:10px">Click row to load graphs · showing current network only</span></div>
+    <div style="padding:0">
+      <table>
+        <thead><tr>
+          <th>Status</th>
+          <th>Name</th>
+          <th>IP Address</th>
+          <th>MAC Address</th>
+          <th>Type</th>
+          <th>RTT (ms)</th>
+          <th>Jitter</th>
+          <th>Packet Loss</th>
+          <th>Quality</th>
+          <th>Hops</th>
+          <th>Last Seen</th>
+        </tr></thead>
+        <tbody id="dev-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="row row-2">
+    <div class="card">
+      <div class="ch">RTT History (30 min) <div class="chips" id="rtt-chips"></div></div>
+      <div class="cb"><div class="chart-wrap"><canvas id="rtt-chart"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="ch">Packet Loss (30 min) <div class="chips" id="loss-chips"></div></div>
+      <div class="cb"><div class="chart-wrap"><canvas id="loss-chart"></canvas></div></div>
+    </div>
+  </div>
+</div>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
