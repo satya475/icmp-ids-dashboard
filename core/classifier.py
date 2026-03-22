@@ -221,11 +221,23 @@ def _classify(ip: str, name: str,
 
     # ── Router detection ──────────────────
     # Routers: very low RTT, always on, gateway keywords
-    if (avg_rtt is not None and avg_rtt < 5 and always):
+    # Exclude devices with Intel/laptop MACs — those are PCs not routers
+    laptop_mac_vendors = ["intel","dell","hp inc","lenovo","acer",
+                          "asus","realtek","d8:b3","d8:b3:2f"]
+    is_laptop_mac = any(k in vendor_l for k in laptop_mac_vendors)
+
+    if avg_rtt is not None and avg_rtt < 10 and always and not is_laptop_mac:
         if any(k in name_l for k in ["router","gateway","gw"]):
             return "router", 98.0, signals
-        if avg_rtt < 2:
-            return "router", 90.0, signals
+        if avg_rtt < 5:
+            return "router", 92.0, signals
+    # Also detect by name
+    if any(k in name_l for k in ["router","gateway","gw"]):
+        return "router", 90.0, signals
+
+    # ── External DNS/Server detection ─────
+    if ip in ("8.8.8.8", "1.1.1.1", "8.8.4.4", "1.0.0.1"):
+        return "server", 95.0, signals
 
     # ── Server detection ──────────────────
     # Servers: always on, low RTT, high traffic
@@ -246,33 +258,56 @@ def _classify(ip: str, name: str,
         return "server", 75.0, signals
 
     # ── Phone detection ───────────────────
-    # Phones: sleep at night, medium RTT, medium traffic
+    # Phones: identified by vendor MAC prefix or sleep pattern
+    phone_vendors = ["apple","samsung","xiaomi","huawei","oppo",
+                     "vivo","oneplus","realme","nokia","motorola",
+                     "lg electronics","sony mobile"]
+    if any(k in vendor_l for k in phone_vendors):
+        return "phone", 88.0, signals
+    # Phone by behavior — sleeps at night
     if sleeps:
-        if any(k in vendor_l for k in ["apple","samsung","xiaomi","huawei"]):
-            return "phone", 88.0, signals
-        if avg_rtt is not None and 10 < avg_rtt < 150:
-            return "phone", 75.0, signals
+        if avg_rtt is not None and avg_rtt < 300:
+            return "phone", 78.0, signals
 
     # ── Laptop detection ──────────────────
-    # Laptops: active in day, sleep sometimes
-    if not always and not sleeps:
-        if avail is not None and 40 < avail < 90:
-            if avg_rtt is not None and avg_rtt < 100:
-                return "laptop", 70.0, signals
+    # Laptops: identified by vendor or intermittent availability
+    laptop_vendors = ["intel","dell","hp inc","hewlett","lenovo",
+                      "acer","asus","microsoft","toshiba","razer"]
+    if any(k in vendor_l for k in laptop_vendors):
+        return "laptop", 85.0, signals
+    # Laptop by behavior — available during day, offline sometimes
+    if not always and avail is not None and 30 < avail < 90:
+        day_a  = avail_sig.get("day_avail", 50)
+        night_a= avail_sig.get("night_avail", 50)
+        if day_a > 60:  # more active during day
+            return "laptop", 72.0, signals
 
-    # ── IoT detection ─────────────────────
-    # IoT: always on but very low traffic, sometimes drops packets
-    if always and traffic in ("very_low", "low"):
-        return "iot", 72.0, signals
-
-    # ── TV detection ─────────────────────
-    # TVs: high traffic bursts, active evenings
+    # ── TV/Media detection ─────────────────
+    tv_vendors = ["samsung electronics","lg innotek","sony",
+                  "apple tv","chromecast","amazon","roku"]
+    if any(k in vendor_l for k in tv_vendors):
+        return "tv", 85.0, signals
     if traffic in ("high", "very_high") and not always:
         return "tv", 70.0, signals
 
     # ── Printer detection ─────────────────
-    if any(k in name_l for k in ["printer","print","hp","epson","canon"]):
+    printer_vendors = ["hp inc","seiko epson","canon","brother",
+                       "xerox","lexmark","ricoh"]
+    if any(k in name_l + vendor_l
+           for k in ["printer","print","epson","canon","brother"]):
+        return "printer", 82.0, signals
+    if any(k in vendor_l for k in printer_vendors):
         return "printer", 80.0, signals
+
+    # ── IoT detection ─────────────────────
+    # IoT: always on, very low traffic, not identified above
+    iot_vendors = ["espressif","raspberry pi","arduino",
+                   "shenzhen","tuya","hikvision","dahua",
+                   "philips","ikea","belkin","tp-link"]
+    if any(k in vendor_l for k in iot_vendors):
+        return "iot", 85.0, signals
+    if always and traffic in ("very_low", "low"):
+        return "iot", 68.0, signals
 
     # ── Unknown ───────────────────────────
     if rtt_sig.get("sample_count", 0) < 20:
@@ -302,7 +337,7 @@ DEVICE_TYPE_META = {
 # ─────────────────────────────────────────
 
 def classify_all(db_file: str = DB_FILE):
-    """Classify all active devices."""
+    """Classify all active devices using Random Forest if available."""
     conn     = get_connection(db_file)
     targets  = load_active_targets(db_file)
 
@@ -325,9 +360,25 @@ def classify_all(db_file: str = DB_FILE):
         avail_sig  = _collect_availability_signal(ip, conn)
         traffic_sig= _collect_traffic_signal(ip, conn)
 
+        # Use rule-based classifier as primary
+        # RF used only when confidence is very high (>85%)
         device_type, confidence, signals = _classify(
             ip, name, rtt_sig, avail_sig, traffic_sig,
             vendors.get(ip, ""))
+
+        # Try RF as secondary — only override if RF is very confident
+        try:
+            from core.ml_engine import classify_device_rf
+            rf_result = classify_device_rf(ip, db_file)
+            if (rf_result["method"] == "random_forest" and
+                rf_result["confidence"] > 85 and
+                rf_result["device_type"] != "unknown"):
+                # RF is very confident — use its result
+                device_type = rf_result["device_type"]
+                confidence  = rf_result["confidence"]
+                signals     = {**rtt_sig, "method": "random_forest_confirmed"}
+        except Exception:
+            pass  # stick with rule-based result
 
         save_classification(ip, device_type, confidence,
                             signals, rtt_sig.get("sample_count", 0),

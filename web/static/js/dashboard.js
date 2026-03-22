@@ -185,7 +185,7 @@ async function updateStats(){
   document.getElementById('last-update').textContent='Updated '+new Date().toLocaleTimeString();
   // Update network badge
   try{
-    const net=await api('/api/network');
+    const net=await api('/api/network/info');
     const badge=document.getElementById('net-badge');
     if(badge&&net.gateway){
       badge.textContent=net.gateway+' ('+net.subnet+')';
@@ -256,7 +256,11 @@ async function updateDevices(){
     if(d.ip===selIp)tr.classList.add('sel');
     tr.innerHTML=`
       <td><span class="badge b-${st}">${st.toUpperCase()}</span></td>
-      <td style="font-weight:500">${d.name}</td>
+      <td style="font-weight:500;cursor:pointer" title="Click to rename"
+          onclick="renameDevice('${d.ip}','${d.name}',event)">
+        ${d.name}
+        <span style="font-size:10px;color:var(--muted);margin-left:4px">✎</span>
+      </td>
       <td style="font-family:monospace;color:var(--muted);font-size:11px">${d.ip}</td>
       <td>${mac}</td>
       <td>${devType}</td>
@@ -465,6 +469,23 @@ function selectDevice(ip,name){
   document.querySelectorAll('.clickable-row').forEach(r=>{
     r.classList.toggle('sel',r.cells[2]&&r.cells[2].textContent===ip);
   });
+}
+
+// ── Device rename ───────────────────────────
+async function renameDevice(ip, currentName, event){
+  event.stopPropagation();
+  const newName = prompt('Enter new name for ' + ip + ':', currentName);
+  if(!newName || newName === currentName) return;
+  const r = await fetch('/api/device/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ip, name: newName})
+  }).then(r=>r.json());
+  if(r.ok){
+    refresh();
+  } else {
+    alert('Failed: ' + r.msg);
+  }
 }
 
 // ── Activity feed ───────────────────────────

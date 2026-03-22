@@ -59,7 +59,7 @@
 <body>
 <header>
   <h1>
-    <a href="/" class="nav-link">← Dashboard</a>
+    <a href="/" class="nav-link">&larr; Dashboard</a>
     AI Insights
   </h1>
   <span id="last-update" style="font-size:11px;color:var(--muted)"></span>
@@ -153,6 +153,18 @@
       <div id="predictions-list">
         <div class="empty">No predictions yet — need 10+ minutes of RTT data per device</div>
       </div>
+    </div>
+  </div>
+
+  <!-- ML Model Status -->
+  <div class="card">
+    <div class="ch">ML Model Status
+      <span class="muted" style="font-weight:400;font-size:10px">
+        Models retrain every 24 hours automatically
+      </span>
+    </div>
+    <div class="cb" id="ml-status-box">
+      <div class="empty">Loading model status...</div>
     </div>
   </div>
 
@@ -340,6 +352,56 @@ async function updatePredictions(){
 }
 
 // ── Refresh ───────────────────────────────
+async function updateMLStatus(){
+  try{
+    const s = await api('/api/ml/status');
+    const el = document.getElementById('ml-status-box');
+      const models = [
+      {name:'Isolation Forest', key:'isolation_forest', min:50,
+       desc:'Anomaly detection - replaces Z-score'},
+      {name:'Random Forest', key:'random_forest', min:20,
+       desc:'Device classifier - replaces rule-based logic'},
+      {name:'Degradation Model', key:'degradation_model', min:0,
+       desc:'Router failure prediction - Gradient Boosting'},
+    ];
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        ${models.map(m=>{
+          const info = s[m.key]||{};
+          const trained = info.trained;
+          const color = trained ? 'var(--up)' : 'var(--warn)';
+          const status = trained ? 'Active' : 'Training...';
+          const samples = info.samples || 0;
+          const trainedAt = info.trained_at
+            ? new Date(info.trained_at).toLocaleString() : 'Not yet';
+          return `<div style="background:var(--surface2);border:1px solid var(--border);
+            border-radius:8px;padding:14px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span style="font-weight:500;font-size:13px">${m.name}</span>
+              <span style="color:${color};font-size:11px;font-weight:600">${status}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${m.desc}</div>
+            <div style="font-size:10px;color:var(--muted)">
+              Samples: ${samples} · Last trained: ${trainedAt}
+            </div>
+            ${!trained&&m.min>0?`<div style="margin-top:8px;font-size:10px;color:var(--warn)">
+              Needs ${m.min} samples to activate
+            </div>`:''}
+            ${!trained&&m.min===0?`<div style="margin-top:8px;font-size:10px;color:var(--warn)">
+              Waiting for first training cycle...
+            </div>`:''}
+            ${trained&&info.mae?`<div style="margin-top:4px;font-size:10px;color:var(--up)">
+              Accuracy (MAE): ${info.mae}
+            </div>`:''}
+            ${trained&&info.baseline?`<div style="font-size:10px;color:var(--muted)">
+              Baseline RTT: ${info.baseline.rtt?.toFixed(1)||'?'}ms
+            </div>`:''}
+          </div>`;
+        }).join('')}
+      </div>`;
+  }catch(e){}
+}
+
 async function refresh(){
   await Promise.all([
     updateSummary(),
@@ -348,6 +410,7 @@ async function refresh(){
     updateAnomalyChart(),
     updateDevices(),
     updatePredictions(),
+    updateMLStatus(),
   ]);
   document.getElementById('last-update').textContent=
     'Updated '+new Date().toLocaleTimeString();

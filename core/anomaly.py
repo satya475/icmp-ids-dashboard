@@ -151,49 +151,53 @@ def _linear_regression(x: list, y: list) -> tuple:
 def detect_rtt_anomaly(host: str, name: str,
                         conn) -> dict | None:
     """
-    Compare latest RTT against device's own historical baseline.
-    Z-score > 2.5 = anomaly.
+    Detect RTT anomalies using Isolation Forest (ML).
+    Falls back to Z-score if model not trained yet.
     """
-    # Get last 50 RTT readings as baseline
-    rows = conn.execute("""
-        SELECT rtt_avg_ms FROM probe_results
+    # Get latest probe result
+    row = conn.execute("""
+        SELECT rtt_avg_ms, rtt_min_ms, rtt_max_ms,
+               packet_loss, jitter_ms
+        FROM probe_results
         WHERE host=? AND is_alive=1
-          AND timestamp > datetime('now', '-6 hours')
-        ORDER BY timestamp DESC
-        LIMIT 50
-    """, (host,)).fetchall()
+        ORDER BY timestamp DESC LIMIT 1
+    """, (host,)).fetchone()
 
-    values = [r["rtt_avg_ms"] for r in rows if r["rtt_avg_ms"]]
+    if not row or not row["rtt_avg_ms"]:
+        return None
 
-    if len(values) < MIN_BASELINE_SAMPLES:
-        return None  # not enough data
+    try:
+        from core.ml_engine import predict_anomaly_if
+        result = predict_anomaly_if(
+            host,
+            row["rtt_avg_ms"], row["rtt_min_ms"],
+            row["rtt_max_ms"], row["packet_loss"] or 0,
+            row["jitter_ms"] or 0
+        )
+        if not result["is_anomaly"]:
+            return None
 
-    # Latest reading is values[0] (most recent)
-    latest   = values[0]
-    baseline = values[1:]  # exclude latest from baseline
+        # Get baseline for message
+        baseline_row = conn.execute("""
+            SELECT AVG(rtt_avg_ms) as avg FROM probe_results
+            WHERE host=? AND is_alive=1
+              AND timestamp > datetime('now', '-6 hours')
+        """, (host,)).fetchone()
+        baseline = baseline_row["avg"] if baseline_row else row["rtt_avg_ms"]
 
-    mean     = _mean(baseline)
-    std      = _std(baseline, mean)
-    z        = _z_score(latest, mean, std)
-
-    if z < Z_SCORE_THRESHOLD:
-        return None  # normal
-
-    # Determine severity
-    if z >= 4.0:   severity = "critical"
-    elif z >= 3.0: severity = "high"
-    else:          severity = "medium"
-
-    return {
-        "type":     "rtt_anomaly",
-        "severity": severity,
-        "value":    round(latest, 1),
-        "baseline": round(mean, 1),
-        "deviation":round(z, 2),
-        "message":  (f"RTT spike detected on {name}: "
-                     f"{latest:.1f}ms vs baseline {mean:.1f}ms "
-                     f"(Z-score: {z:.1f})"),
-    }
+        return {
+            "type":     "rtt_anomaly",
+            "severity": result["severity"],
+            "value":    round(row["rtt_avg_ms"], 1),
+            "baseline": round(baseline or 0, 1),
+            "deviation":result["score"],
+            "message":  (f"RTT anomaly on {name}: "
+                         f"{row['rtt_avg_ms']:.1f}ms "
+                         f"(baseline ~{baseline:.1f}ms) "
+                         f"[{result['method']}]"),
+        }
+    except Exception as e:
+        return None
 
 
 # ─────────────────────────────────────────

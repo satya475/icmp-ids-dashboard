@@ -190,12 +190,41 @@ def subnet_base(subnet: str) -> str:
 
 
 def resolve_hostname(ip: str) -> Optional[str]:
-    """Reverse DNS lookup. Returns short hostname or None."""
+    """
+    Try multiple methods to get a human-readable name for an IP.
+    1. Reverse DNS
+    2. NetBIOS name (Windows devices)
+    3. mDNS (.local names)
+    Returns short hostname or None.
+    """
+    # Method 1 — Reverse DNS
     try:
         name = socket.gethostbyaddr(ip)[0]
-        return name.split(".")[0]
+        if name and name != ip:
+            # Clean up — remove domain suffix, keep short name
+            short = name.split(".")[0]
+            if short and short != ip and len(short) > 1:
+                return short
     except Exception:
-        return None
+        pass
+
+    # Method 2 — NetBIOS (Windows PC names on local network)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nbtstat", "-A", ip],
+            capture_output=True, text=True, timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0
+        )
+        for line in result.stdout.splitlines():
+            if "<00>" in line and "UNIQUE" in line:
+                name = line.split()[0].strip()
+                if name and name != ip:
+                    return name
+    except Exception:
+        pass
+
+    return None
 
 
 def get_my_ip() -> Optional[str]:
