@@ -17,7 +17,8 @@ function fmtRate(bps){
 
 async function startBW(){
   const r=await fetch('/api/bandwidth/start',{method:'POST'}).then(r=>r.json());
-  if(r.ok)setBWRunning(true);else alert(r.msg);
+  if(r.ok) setBWRunning(true);
+  else alert(r.msg || 'Failed to start capture');
 }
 async function stopBW(){
   const r=await fetch('/api/bandwidth/stop',{method:'POST'}).then(r=>r.json());

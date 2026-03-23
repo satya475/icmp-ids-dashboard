@@ -243,6 +243,16 @@ async def alerts_save(request: Request):
 
 # ── Bandwidth ─────────────────────────────
 
+@router.post("/api/bandwidth/start")
+def bandwidth_start(request: Request):
+    pm = request.app.state.process_manager
+    return js(pm.start_bandwidth())
+
+@router.post("/api/bandwidth/stop")
+def bandwidth_stop(request: Request):
+    pm = request.app.state.process_manager
+    return js(pm.stop_bandwidth())
+
 @router.get("/api/bandwidth/live")
 def bandwidth_live():
     from db.queries import get_bandwidth_live
@@ -250,7 +260,6 @@ def bandwidth_live():
         return js(get_bandwidth_live())
     except Exception:
         return js([])
-
 
 @router.get("/api/bandwidth/totals")
 def bandwidth_totals():
@@ -260,7 +269,24 @@ def bandwidth_totals():
     except Exception:
         return js({})
 
-
+@router.get("/api/bandwidth/history/{ip}")
+def bandwidth_history(ip: str):
+    from db.database import get_connection
+    from config import DB_FILE
+    try:
+        conn = get_connection(DB_FILE)
+        rows = conn.execute("""
+            SELECT timestamp,
+                   bytes_in * 1.0 / 5 as rate_in,
+                   bytes_out * 1.0 / 5 as rate_out
+            FROM bandwidth_samples
+            WHERE ip=?
+            ORDER BY timestamp DESC LIMIT 100
+        """, (ip,)).fetchall()
+        conn.close()
+        return js([dict(r) for r in reversed(rows)])
+    except Exception:
+        return js([])
 # ── Reports ───────────────────────────────
 
 @router.get("/api/report/{period}")
