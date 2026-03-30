@@ -18,6 +18,8 @@ understands what's normal for your specific network.
 """
 
 import sys, os
+
+from core.ml_engine import MODEL_DIR
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
@@ -300,9 +302,9 @@ def train_on_synthetic(db_file: str = DB_FILE) -> bool:
     )
     iso_forest.fit(X_combined)
 
-    with open(os.path.join(MODEL_DIR, "isolation_forest.pkl"), "wb") as f:
+    with open(os.path.join(MODEL_DIR, "synthetic_isolation_forest.pkl"), "wb") as f:
         pickle.dump(iso_forest, f)
-    with open(os.path.join(MODEL_DIR, "scaler.pkl"), "wb") as f:
+    with open(os.path.join(MODEL_DIR, "synthetic_scaler.pkl"), "wb") as f:
         pickle.dump(scaler, f)
     print("  [SYNTHETIC] Isolation Forest trained and saved")
 
@@ -323,21 +325,21 @@ def train_on_synthetic(db_file: str = DB_FILE) -> bool:
     mae    = mean_absolute_error(y_test, y_pred)
     print(f"  [SYNTHETIC] Degradation model MAE: {mae:.3f}")
 
-    with open(os.path.join(MODEL_DIR, "degradation_model.pkl"), "wb") as f:
+    with open(os.path.join(MODEL_DIR, "synthetic_degradation_model.pkl"), "wb") as f:
         pickle.dump(degradation_model, f)
 
     # Save metadata
     meta = {
-        "synthetic_trained":   datetime.now().isoformat(),
-        "synthetic_samples":   len(X),
-        "real_samples_mixed":  len(real_X),
-        "baseline":            dataset["baseline"],
-        "isolation_forest_trained": datetime.now().isoformat(),
-        "isolation_forest_samples": len(X_combined),
-        "degradation_mae":     round(mae, 4),
-        "features":            dataset["features"],
+        "synthetic_trained":           datetime.now().isoformat(),
+        "synthetic_samples":           len(X),
+        "real_samples_mixed":          len(real_X),
+        "baseline":                    dataset["baseline"],
+        "synthetic_if_trained":        datetime.now().isoformat(),
+        "synthetic_if_samples":        len(X_combined),
+        "degradation_mae":             round(mae, 4),
+        "features":                    dataset["features"],
     }
-    with open(os.path.join(MODEL_DIR, "model_meta.pkl"), "wb") as f:
+    with open(os.path.join(MODEL_DIR, "synthetic_model_meta.pkl"), "wb") as f:
         pickle.dump(meta, f)
 
     print("\n  [SYNTHETIC] All models trained successfully!")
@@ -348,12 +350,18 @@ def train_on_synthetic(db_file: str = DB_FILE) -> bool:
 def _get_real_features(db_file: str = DB_FILE) -> np.ndarray:
     """Get real probe features for mixing with synthetic data."""
     conn = get_connection(db_file)
+
+    # Join probe_results with device_health_daily for real uptime + score
     rows = conn.execute("""
-        SELECT rtt_avg_ms, jitter_ms, packet_loss,
-               100.0 as uptime, 70.0 as score
-        FROM probe_results
-        WHERE is_alive=1 AND rtt_avg_ms IS NOT NULL
-          AND timestamp > datetime('now', '-7 days')
+        SELECT p.rtt_avg_ms, p.jitter_ms, p.packet_loss,
+               COALESCE(d.uptime_pct, 95.0)    as uptime,
+               COALESCE(d.health_score, 70.0)  as score
+        FROM probe_results p
+        LEFT JOIN device_health_daily d
+            ON d.ip = p.host
+            AND d.date = date(p.timestamp)
+        WHERE p.is_alive=1 AND p.rtt_avg_ms IS NOT NULL
+          AND p.timestamp > datetime('now', '-7 days')
         ORDER BY RANDOM()
         LIMIT 2000
     """).fetchall()
@@ -365,11 +373,11 @@ def _get_real_features(db_file: str = DB_FILE) -> np.ndarray:
     X = []
     for r in rows:
         X.append([
-            r["rtt_avg_ms"]       or 0,
-            r["jitter_ms"]        or 0,
-            (r["packet_loss"]     or 0) * 100,
-            100.0,
-            70.0,
+            r["rtt_avg_ms"]   or 0,
+            r["jitter_ms"]    or 0,
+            (r["packet_loss"] or 0) * 100,
+            r["uptime"]       or 95.0,
+            r["score"]        or 70.0,
         ])
     return np.array(X)
 
@@ -394,7 +402,7 @@ def predict_degradation_score(rtt: float, jitter: float,
     MODEL_DIR = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "models")
-    model_path = os.path.join(MODEL_DIR, "degradation_model.pkl")
+    model_path = os.path.join(MODEL_DIR, "synthetic_degradation_model.pkl")
 
     if not os.path.exists(model_path):
         return {"score": None, "label": "unknown",

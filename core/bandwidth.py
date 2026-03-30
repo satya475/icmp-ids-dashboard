@@ -3,12 +3,11 @@ core/bandwidth.py
 ==================
 Per-device bandwidth monitoring via packet capture (scapy + npcap).
 """
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 import sys, os, time, threading, collections
 sys.stdout.reconfigure(encoding='utf-8')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime
 from config import DB_FILE, BW_SAMPLE_INTERVAL
@@ -118,11 +117,25 @@ def run():
     subnet, _ = detect_network()
 
     try:
-        t_sniff   = threading.Thread(target=_sniffer,       args=(subnet,), daemon=True)
-        t_sample  = threading.Thread(target=_sampling_loop, daemon=True)
+        t_sniff  = threading.Thread(target=_sniffer,       args=(subnet,), daemon=True)
+        t_sample = threading.Thread(target=_sampling_loop, daemon=True)
         t_sniff.start()
         t_sample.start()
-        _display_loop(subnet)
+
+        # Only show console display when run directly in a terminal
+        # When launched as subprocess by process_manager — stay silent
+        try:
+            is_terminal = os.isatty(sys.stdout.fileno())
+        except Exception:
+            is_terminal = False
+
+        if is_terminal:
+            _display_loop(subnet)
+        else:
+            print("  Bandwidth monitor running silently (subprocess mode)")
+            while True:
+                time.sleep(60)
+
     except KeyboardInterrupt:
         print("\n  Bandwidth monitor stopped.")
 

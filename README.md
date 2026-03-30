@@ -477,3 +477,27 @@ Ensure you're using the latest `api/process_manager.py` with `CREATE_NO_WINDOW` 
 ---
 
 *PingGuard — Built for enterprise network intelligence.*
+
+
+
+## Installation
+
+### Requirements
+- Python 3.10+
+- Windows (uses icmplib, tracert)
+- Npcap (for bandwidth monitoring) — https://npcap.com
+
+### First time setup
+```bash
+git clone https://github.com/yourname/pingguard
+cd pingguard
+pip install -r requirements.txt
+python setup.py        # creates DB, downloads vendor data, trains models
+python main.py         # start the dashboard
+```
+
+Open http://localhost:5000 — enter your router IP and click Start.
+
+### Note
+The database (`network_monitor.db`) is not included in the repo intentionally.
+`setup.py` creates a fresh one for your network automatically.

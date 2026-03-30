@@ -29,7 +29,15 @@ def upsert_target(ip: str, name: str, db_file: str = DB_FILE):
     conn = get_connection(db_file)
     conn.execute("""INSERT INTO active_targets (ip, name, added_at, active)
         VALUES (?, ?, ?, 1)
-        ON CONFLICT(ip) DO UPDATE SET name=excluded.name, active=1""",
+        ON CONFLICT(ip) DO UPDATE SET
+            name = CASE
+                WHEN excluded.name != excluded.ip
+                    THEN excluded.name   -- new name is a real name, use it
+                WHEN active_targets.name != active_targets.ip
+                    THEN active_targets.name  -- keep existing real name
+                ELSE excluded.name       -- both are just IPs, use new one
+            END,
+            active = 1""",
         (ip, name, datetime.now().isoformat()))
     conn.commit()
     conn.close()
@@ -41,7 +49,9 @@ def deactivate_subnet_targets(subnet_base: str, found_ips: set, db_file: str = D
     conn = get_connection(db_file)
     placeholders = ",".join("?" * len(found_ips))
     conn.execute(f"""UPDATE active_targets SET active=0
-        WHERE ip LIKE ? AND ip NOT IN ({placeholders})""",
+        WHERE ip LIKE ?
+          AND ip NOT IN ({placeholders})
+          AND ip NOT IN ('8.8.8.8','1.1.1.1','8.8.4.4','1.0.0.1')""",
         [subnet_base + "%"] + list(found_ips))
     conn.commit()
     conn.close()
@@ -53,14 +63,14 @@ def deactivate_subnet_targets(subnet_base: str, found_ips: set, db_file: str = D
 
 def save_probe_result(host: str, name: str, is_alive: bool,
                       rtt_avg: Optional[float], rtt_min: Optional[float],
-                      rtt_max: Optional[float], packet_loss: float,
+                      rtt_max: Optional[float], packet_loss: float,rtt_med: Optional[float] = None, jitter: Optional[float] = None, quality: Optional[str] = None,
                       db_file: str = DB_FILE):
     conn = get_connection(db_file)
     conn.execute("""INSERT INTO probe_results
-        (host, name, timestamp, is_alive, rtt_avg_ms, rtt_min_ms, rtt_max_ms, packet_loss)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (host, name, timestamp, is_alive, rtt_avg_ms, rtt_min_ms, rtt_max_ms, packet_loss, rtt_med_ms, jitter_ms, quality)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (host, name, datetime.now().isoformat(), int(is_alive),
-         rtt_avg, rtt_min, rtt_max, packet_loss))
+         rtt_avg, rtt_min, rtt_max, packet_loss, rtt_med, jitter, quality))
     conn.commit()
     conn.close()
 

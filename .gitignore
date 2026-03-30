@@ -11,3 +11,30 @@ dist/
 build/
 .DS_Store
 Thumbs.db
+# Database — never commit this
+network_monitor.db
+network_monitor.db-wal
+network_monitor.db-shm
+
+# ML models — large binary files, retrain locally
+models/isolation_forest.pkl
+models/random_forest.pkl
+models/scaler.pkl
+models/model_meta.pkl
+models/degradation_model.pkl
+models/synthetic_isolation_forest.pkl
+models/synthetic_scaler.pkl
+models/synthetic_model_meta.pkl
+
+# OUI vendor database — downloaded separately
+data/oui.csv
+
+# Environment — contains passwords
+
+# Python cache
+ 
+ 
+.Python
+
+# Logs
+*.log

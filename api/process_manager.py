@@ -138,9 +138,9 @@ class ProcessManager:
             self._launch("discovery",  os.path.join("core", "discovery.py"),        cwd)
             self._launch("probe",      os.path.join("core", "probe.py"),            cwd)
             self._launch("traceroute", os.path.join("core", "traceroute.py"),       cwd)
-            self._launch("health",     os.path.join("core", "health.py"),           cwd)
             self._launch("classifier", os.path.join("core", "classifier.py"),       cwd)
             self._launch("anomaly",    os.path.join("core", "anomaly.py"),          cwd)
+            self._launch("network_manager", os.path.join("core", "network_manager.py"), cwd)
             self.running = True
 
         return {"ok": True, "msg": f"Monitor started for {router_ip}"}
@@ -157,7 +157,7 @@ class ProcessManager:
             return {"ok": False, "msg": "Not running"}
         with self.lock:
             for name in ["watchdog", "discovery", "probe",
-                         "traceroute", "health", "classifier", "anomaly"]:
+                         "traceroute", "classifier", "anomaly","network_manager"]:
                 proc = self.procs.get(name)
                 if proc:
                     try:
@@ -167,8 +167,8 @@ class ProcessManager:
                         pass
             self.procs = {k: v for k, v in self.procs.items()
                           if k not in ("watchdog", "discovery", "probe",
-                                       "traceroute", "health",
-                                       "classifier", "anomaly")}
+                                       "traceroute",
+                                       "classifier", "anomaly","network_manager")}
             self.running = False
         return {"ok": True, "msg": "Monitor stopped"}
 

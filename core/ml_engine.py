@@ -23,6 +23,79 @@ from datetime import datetime, timedelta
 from db.database import get_connection
 from config import DB_FILE
 
+
+
+
+# Vendor → numeric category mapping for RF features
+VENDOR_CATEGORY = {
+    # Phones
+    "apple":        1,
+    "samsung":      1,
+    "xiaomi":       1,
+    "huawei":       1,
+    "oppo":         1,
+    "vivo":         1,
+    "oneplus":      1,
+    "realme":       1,
+    "nokia":        1,
+    "motorola":     1,
+    # Laptops / PCs
+    "intel":        2,
+    "dell":         2,
+    "lenovo":       2,
+    "acer":         2,
+    "asus":         2,
+    "microsoft":    2,
+    "toshiba":      2,
+    "razer":        2,
+    "hp inc":       2,
+    "hewlett":      2,
+    # Routers / Network
+    "tp-link":      3,
+    "netgear":      3,
+    "cisco":        3,
+    "d-link":       3,
+    "asus":         3,
+    "huawei":       3,
+    # IoT
+    "espressif":    4,
+    "raspberry pi": 4,
+    "arduino":      4,
+    "tuya":         4,
+    "hikvision":    4,
+    "philips hue":  4,
+    "ikea":         4,
+    # TV / Media
+    "apple tv":     5,
+    "chromecast":   5,
+    "amazon":       5,
+    "roku":         5,
+    "sony":         5,
+    "lg":           5,
+    "samsung electronics": 5,
+    # Servers / NAS
+    "raspberry pi": 6,
+    "synology":     6,
+    "vmware":       6,
+    # Unknown
+}
+
+def _vendor_to_category(ip: str, conn) -> int:
+    """Convert vendor string to numeric category for RF feature."""
+    try:
+        row = conn.execute(
+            "SELECT vendor FROM discovered_devices WHERE ip=?", (ip,)
+        ).fetchone()
+        if not row or not row["vendor"]:
+            return 0
+        v = row["vendor"].lower()
+        for keyword, category in VENDOR_CATEGORY.items():
+            if keyword in v:
+                return category
+    except Exception:
+        pass
+    return 0  # unknown vendor
+
 # ─────────────────────────────────────────
 # Model storage path
 # ─────────────────────────────────────────
@@ -215,8 +288,9 @@ INT_TO_TYPE  = {i: t for i, t in enumerate(DEVICE_TYPES)}
 def _build_classifier_features(ip: str, conn) -> list:
     """
     Build feature vector for device classification.
-    Features: [avg_rtt, rtt_consistency, availability, sleeps_at_night,
-               always_on, traffic_level, day_avail, night_avail]
+    Features: [avg_rtt, rtt_range, availability, sleeps_at_night,
+               always_on, traffic_level, day_avail, night_avail,
+               vendor_category]   ← NEW
     """
     # RTT features
     rtt_rows = conn.execute("""
@@ -229,8 +303,8 @@ def _build_classifier_features(ip: str, conn) -> list:
           AND timestamp > datetime('now', '-48 hours')
     """, (ip,)).fetchone()
 
-    avg_rtt  = rtt_rows["avg_rtt"] or 100
-    rtt_range= (rtt_rows["max_rtt"] or 0) - (rtt_rows["min_rtt"] or 0)
+    avg_rtt   = rtt_rows["avg_rtt"]  or 100
+    rtt_range = (rtt_rows["max_rtt"] or 0) - (rtt_rows["min_rtt"] or 0)
 
     # Availability features
     avail_rows = conn.execute("""
@@ -242,17 +316,17 @@ def _build_classifier_features(ip: str, conn) -> list:
         LIMIT 500
     """, (ip,)).fetchall()
 
-    total      = len(avail_rows) or 1
-    alive      = sum(1 for r in avail_rows if r["is_alive"] == 1)
+    total        = len(avail_rows) or 1
+    alive        = sum(1 for r in avail_rows if r["is_alive"] == 1)
     availability = alive / total * 100
 
     night = [r for r in avail_rows if r["hour"] >= 22 or r["hour"] < 7]
     day   = [r for r in avail_rows if 7 <= r["hour"] < 22]
 
-    night_avail = (sum(1 for r in night if r["is_alive"]==1) /
-                   len(night) * 100) if night else 50
-    day_avail   = (sum(1 for r in day   if r["is_alive"]==1) /
-                   len(day)   * 100) if day   else 50
+    night_avail  = (sum(1 for r in night if r["is_alive"]==1) /
+                    len(night) * 100) if night else 50
+    day_avail    = (sum(1 for r in day   if r["is_alive"]==1) /
+                    len(day)   * 100) if day   else 50
 
     sleeps_night = 1 if (night_avail < day_avail - 20) else 0
     always_on    = 1 if availability > 95 else 0
@@ -268,13 +342,15 @@ def _build_classifier_features(ip: str, conn) -> list:
     except Exception:
         total_traffic = 0
 
-    # Normalize traffic to 0-10 scale
-    if total_traffic > 1e9:   traffic_level = 10
+    if   total_traffic > 1e9: traffic_level = 10
     elif total_traffic > 1e8: traffic_level = 8
     elif total_traffic > 1e7: traffic_level = 6
     elif total_traffic > 1e6: traffic_level = 4
     elif total_traffic > 1e5: traffic_level = 2
     else:                     traffic_level = 0
+
+    # Vendor category — NEW
+    vendor_cat = _vendor_to_category(ip, conn)
 
     return [
         min(avg_rtt, 500),
@@ -285,7 +361,9 @@ def _build_classifier_features(ip: str, conn) -> list:
         traffic_level,
         day_avail,
         night_avail,
+        vendor_cat,          # ← NEW 9th feature
     ]
+
 
 
 def _get_training_labels(db_file: str = DB_FILE) -> list:

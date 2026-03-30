@@ -154,7 +154,7 @@ def scan(subnet: str) -> list:
         vendor   = lookup_vendor(info["mac"])
         hostname = resolve_hostname(ip)
         is_new   = ip not in known
-        name     = vendor if vendor != "Unknown" else (hostname or ip)
+        name = hostname or (vendor if vendor != "Unknown" else ip)
 
         upsert_device(ip, info["mac"], vendor, hostname, info["method"])
         upsert_target(ip, name)

@@ -15,7 +15,7 @@ if 'device_health_daily' in tables:
         rows = conn.execute(
             "SELECT * FROM device_health_daily LIMIT 3").fetchall()
         for r in rows:
-            print("  Sample:", dict(r))
+            print(dict(zip([d[0] for d in conn.description], r)))
 else:
     print("device_health_daily table NOT found - engine not running yet")
 

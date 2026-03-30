@@ -205,7 +205,8 @@ def _classify(ip: str, name: str,
               rtt_sig: dict,
               avail_sig: dict,
               traffic_sig: dict,
-              vendor: str = None) -> tuple[str, float, dict]:
+              vendor: str = None,
+              mac: str = None) -> tuple[str, float, dict]:
     """
     Rule-based classifier using all signals.
     Returns (device_type, confidence, signals_summary).
@@ -310,7 +311,7 @@ def _classify(ip: str, name: str,
         return "iot", 68.0, signals
 
     # ── Unknown ───────────────────────────
-    if rtt_sig.get("sample_count", 0) < 20:
+    if rtt_sig.get("sample_count", 0) < 5:
         return "unknown", 0.0, signals   # not enough data
 
     return "unknown", 40.0, signals
@@ -351,6 +352,15 @@ def classify_all(db_file: str = DB_FILE):
     except Exception:
         pass
 
+    macs = {}
+    try:
+        mac_rows = conn.execute(
+            "SELECT ip, mac FROM discovered_devices"
+        ).fetchall()
+        macs = {r["ip"]: r["mac"] for r in mac_rows}
+    except Exception:
+        pass
+
     results = []
     for t in targets:
         ip   = t["host"]
@@ -362,9 +372,19 @@ def classify_all(db_file: str = DB_FILE):
 
         # Use rule-based classifier as primary
         # RF used only when confidence is very high (>85%)
+# Get MAC address for this device
+        macs = {}
+        try:
+            mac_rows = conn.execute(
+                "SELECT ip, mac FROM discovered_devices"
+            ).fetchall()
+            macs = {r["ip"]: r["mac"] for r in mac_rows}
+        except Exception:
+            pass
+
         device_type, confidence, signals = _classify(
             ip, name, rtt_sig, avail_sig, traffic_sig,
-            vendors.get(ip, ""))
+            vendors.get(ip, ""), macs.get(ip, ""))
 
         # Try RF as secondary — only override if RF is very confident
         try:

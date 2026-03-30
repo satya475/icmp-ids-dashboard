@@ -167,3 +167,6 @@ def run():
 
         except Exception as e:
             print(f"  [WATCHDOG ERROR] {e}")
+    
+if __name__ == "__main__":
+    run()

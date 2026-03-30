@@ -281,7 +281,7 @@ def take_snapshot(session_id: int, db_file: str = DB_FILE):
 
     # Get latest probe results — filter to current subnet only
     rows = conn.execute("""
-        SELECT p.host, p.is_alive, p.rtt_avg_ms, p.packet_loss
+        SELECT t.ip,p.host, p.is_alive, p.rtt_avg_ms, p.packet_loss
         FROM active_targets t
         LEFT JOIN probe_results p ON p.host = t.ip
             AND p.timestamp = (
@@ -293,8 +293,8 @@ def take_snapshot(session_id: int, db_file: str = DB_FILE):
     # Filter to current subnet
     if subnet_base:
         rows = [r for r in rows if
-                dict(r)["host"].startswith(subnet_base) or
-                dict(r)["host"] in ("8.8.8.8", "1.1.1.1")]
+                (dict(r)["host"] or dict(r)["ip"] or "").startswith(subnet_base) or
+                (dict(r)["host"] or dict(r)["ip"]) in ("8.8.8.8", "1.1.1.1")]
 
     devices_total = len(rows)
     devices_up    = sum(1 for r in rows if r["is_alive"] == 1)

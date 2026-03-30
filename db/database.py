@@ -10,8 +10,10 @@ from config import DB_FILE
 
 def get_connection(db_file: str = DB_FILE) -> sqlite3.Connection:
     """Open a database connection with row factory enabled."""
-    conn = sqlite3.connect(db_file, check_same_thread=False)
+    conn = sqlite3.connect(db_file, check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")    # allows multiple processes to read/write
+    conn.execute("PRAGMA synchronous=NORMAL")  # faster writes, still safe
     return conn
 
 
@@ -20,16 +22,20 @@ def init_schema(db_file: str = DB_FILE):
     conn = get_connection(db_file)
 
     conn.execute("""CREATE TABLE IF NOT EXISTS probe_results (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        host        TEXT    NOT NULL,
-        name        TEXT    NOT NULL,
-        timestamp   TEXT    NOT NULL,
-        is_alive    INTEGER NOT NULL,
-        rtt_avg_ms  REAL,
-        rtt_min_ms  REAL,
-        rtt_max_ms  REAL,
-        packet_loss REAL    NOT NULL
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    host        TEXT    NOT NULL,
+    name        TEXT    NOT NULL,
+    timestamp   TEXT    NOT NULL,
+    is_alive    INTEGER NOT NULL,
+    rtt_avg_ms  REAL,
+    rtt_min_ms  REAL,
+    rtt_max_ms  REAL,
+    rtt_med_ms  REAL,       -- ADD THIS
+    jitter_ms   REAL,       -- ADD THIS
+    quality     TEXT,       -- ADD THIS
+    packet_loss REAL        NOT NULL
     )""")
+
 
     conn.execute("""CREATE TABLE IF NOT EXISTS state_changes (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,

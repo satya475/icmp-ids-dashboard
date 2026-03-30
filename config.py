@@ -14,7 +14,8 @@ load_dotenv()
 # ─────────────────────────────────────────
 # Database
 # ─────────────────────────────────────────
-DB_FILE = os.getenv("DB_FILE", "network_monitor.db")
+DB_FILE = os.getenv("DB_FILE", os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "network_monitor.db"))
 
 # ─────────────────────────────────────────
 # Probe engine
@@ -52,7 +53,10 @@ SECRET_KEY       = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 # ─────────────────────────────────────────
 # Alerts — Email
 # ─────────────────────────────────────────
-ALERT_EMAIL_ENABLED  = os.getenv("ALERT_EMAIL_FROM", "") != ""
+ALERT_EMAIL_ENABLED = (
+    os.getenv("ALERT_EMAIL_ENABLED", "false").lower() == "true"
+    or os.getenv("ALERT_EMAIL_FROM", "") != ""
+)
 ALERT_EMAIL_FROM     = os.getenv("ALERT_EMAIL_FROM",     "")
 ALERT_EMAIL_TO       = os.getenv("ALERT_EMAIL_TO",       "")
 ALERT_EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASSWORD", "")

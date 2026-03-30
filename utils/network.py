@@ -10,36 +10,51 @@ import subprocess
 import re
 import socket
 from typing import Tuple, Optional
-
+import os
 
 def detect_network() -> Tuple[str, str]:
     """
     Auto-detect active subnet and gateway from ipconfig.
-    Called fresh every time — never uses cached values.
-    Returns (subnet, gateway) e.g. ("192.168.1.0/24", "192.168.1.1")
-    Works on any router automatically.
+    Returns (subnet, gateway).
     """
     try:
         output = subprocess.check_output(
-            "ipconfig", text=True, stderr=subprocess.DEVNULL)
+            "ipconfig", text=True, stderr=subprocess.DEVNULL
+        )
         blocks = re.split(r'\r?\n\r?\n', output)
 
         candidates = []
+
         for block in blocks:
             if "Media disconnected" in block or "Tunnel" in block:
                 continue
+
+            name_match = re.search(r"^(.+?):", block, re.MULTILINE)
             gw = re.search(r"Default Gateway[^:]*:\s*([\d.]+)", block)
             ip = re.search(r"IPv4 Address[^:]*:\s*([\d.]+)", block)
+
             if gw and ip:
+                adapter_name = name_match.group(1).strip() if name_match else "Unknown"
                 gateway = gw.group(1).strip()
-                my_ip   = ip.group(1).strip()
+                my_ip = ip.group(1).strip()
+
                 if not gateway.startswith("169.") and gateway != "0.0.0.0":
-                    candidates.append((gateway, my_ip))
+                    candidates.append((adapter_name, gateway, my_ip))
 
         if candidates:
-            # Prefer Wi-Fi over other adapters
-            gateway, my_ip = candidates[0]
-            base   = ".".join(gateway.split(".")[:3])
+            # Prefer Wi-Fi / Wireless adapters first
+            def priority(item):
+                name = item[0].lower()
+                if "wi-fi" in name or "wireless" in name or "wlan" in name:
+                    return 0
+                if "ethernet" in name:
+                    return 1
+                return 2
+
+            candidates.sort(key=priority)
+
+            _, gateway, my_ip = candidates[0]
+            base = ".".join(gateway.split(".")[:3])
             subnet = f"{base}.0/24"
             return subnet, gateway
 
@@ -189,38 +204,52 @@ def subnet_base(subnet: str) -> str:
     return ".".join(subnet.split(".")[:3])
 
 
+
+
 def resolve_hostname(ip: str) -> Optional[str]:
-    """
-    Try multiple methods to get a human-readable name for an IP.
-    1. Reverse DNS
-    2. NetBIOS name (Windows devices)
-    3. mDNS (.local names)
-    Returns short hostname or None.
-    """
     # Method 1 — Reverse DNS
     try:
         name = socket.gethostbyaddr(ip)[0]
         if name and name != ip:
-            # Clean up — remove domain suffix, keep short name
             short = name.split(".")[0]
             if short and short != ip and len(short) > 1:
                 return short
     except Exception:
         pass
 
-    # Method 2 — NetBIOS (Windows PC names on local network)
+    # Method 2 — ping -a (Windows resolves NetBIOS/mDNS names)
+    # Works for: Windows PCs, many modern devices
+    # Output: "Pinging DESKTOP-ABC123 [192.168.1.5]"
     try:
-        import subprocess
+        result = subprocess.run(
+            ["ping", "-a", "-n", "1", "-w", "500", ip],
+            capture_output=True, text=True, timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        )
+        for line in result.stdout.splitlines():
+            m = re.search(r'Pinging\s+(\S+)\s+\[', line)
+            if m:
+                name = m.group(1).strip()
+                if name and name != ip:
+                    return name.split(".")[0]  # strip domain if any
+    except Exception:
+        pass
+
+    # Method 3 — nbtstat (Windows NetBIOS names)
+    # Works for: Windows PCs with NetBIOS enabled
+    try:
         result = subprocess.run(
             ["nbtstat", "-A", ip],
             capture_output=True, text=True, timeout=3,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         )
         for line in result.stdout.splitlines():
             if "<00>" in line and "UNIQUE" in line:
-                name = line.split()[0].strip()
-                if name and name != ip:
-                    return name
+                parts = line.split()
+                if parts:
+                    name = parts[0].strip()
+                    if name and name != ip:
+                        return name
     except Exception:
         pass
 
