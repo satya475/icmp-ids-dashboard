@@ -551,8 +551,25 @@ def device_history(ip: str, days: int = 30):
 @router.get("/api/device/degradation")
 def device_degradation():
     try:
-        from core.device_health import get_all_degradation
-        return js(get_all_degradation())
+        from db.database import get_connection
+        from config import DB_FILE
+        conn = get_connection(DB_FILE)
+        rows = conn.execute("""
+            SELECT d.*,
+                   COALESCE(c.device_type, 'unknown') as device_type,
+                   COALESCE(c.confidence, 0)          as type_confidence
+            FROM device_degradation d
+            LEFT JOIN device_classifications c ON c.ip = d.ip
+            ORDER BY
+                CASE d.replacement_priority
+                    WHEN 'urgent'  THEN 1
+                    WHEN 'soon'    THEN 2
+                    WHEN 'monitor' THEN 3
+                    ELSE 4 END,
+                d.decline_rate_per_week ASC
+        """).fetchall()
+        conn.close()
+        return js([dict(r) for r in rows])
     except Exception:
         return js([])
 

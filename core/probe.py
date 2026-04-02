@@ -32,10 +32,10 @@ init(autoreset=True)
 # Adaptive packet configuration
 # ─────────────────────────────────────────
 # Packet counts per device state — adapts automatically
-PROBE_COUNT_STABLE   = 3    # stable UP device — save bandwidth
-PROBE_COUNT_DEFAULT  = 5    # new/unknown device — baseline
-PROBE_COUNT_UNSTABLE = 10   # recent packet loss — more accuracy
-PROBE_COUNT_DEGRADED = 15   # degraded/just recovered — maximum accuracy
+PROBE_COUNT_STABLE   = 5   # stable UP device — save bandwidth
+PROBE_COUNT_DEFAULT  = 10    # new/unknown device — baseline
+PROBE_COUNT_UNSTABLE = 15   # recent packet loss — more accuracy
+PROBE_COUNT_DEGRADED = 20   # degraded/just recovered — maximum accuracy
 
 DOWN_THRESHOLD   = 3      # consecutive failures → DOWN
 UP_THRESHOLD     = 2      # consecutive successes → UP
@@ -94,6 +94,63 @@ STATUS_COLOR = {
     "UNKNOWN": Fore.WHITE,
     "SLEEP":   Fore.CYAN,
 }
+
+
+# ─────────────────────────────────────────
+# Accuracy helpers
+# ─────────────────────────────────────────
+import ctypes
+import socket
+import subprocess
+import re as _re
+
+def _set_high_priority():
+    """Set probe thread to high priority for accurate timing."""
+    try:
+        if os.name == "nt":
+            ctypes.windll.kernel32.SetThreadPriority(
+                ctypes.windll.kernel32.GetCurrentThread(), 2)
+    except Exception:
+        pass
+
+
+def _tcp_reachable(host: str,
+                   ports: list = [80, 443, 8080, 22],
+                   timeout: float = 0.5) -> bool:
+    """Check if host responds to TCP — catches ICMP-blocking devices."""
+    for port in ports:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            if s.connect_ex((host, port)) == 0:
+                s.close()
+                return True
+            s.close()
+        except Exception:
+            pass
+    return False
+
+
+def _arp_reachable(host: str) -> bool:
+    """
+    Check ARP table — if device has ARP entry it is
+    physically present on network even if blocking ICMP+TCP.
+    """
+    try:
+        result = subprocess.run(
+            ["arp", "-a", host],
+            capture_output=True, text=True, timeout=2,
+            creationflags=subprocess.CREATE_NO_WINDOW
+            if os.name == "nt" else 0
+        )
+        mac_pattern = _re.compile(
+            r"([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:]"
+            r"[0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:]"
+            r"[0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})")
+        return bool(mac_pattern.search(result.stdout))
+    except Exception:
+        return False
+
 
 # ─────────────────────────────────────────
 # RTT statistics
@@ -185,12 +242,22 @@ def probe_host(host: str, name: str,
         )
 
         if result.is_alive:
+            _set_high_priority()           # accurate timing
             rtts    = result.rtts          # list of individual RTT values
-            avg_rtt = result.avg_rtt
             min_rtt = result.min_rtt
             max_rtt = result.max_rtt
-            med_rtt = _median(rtts)        # median — our primary value
-            jitter  = _std_deviation(rtts, avg_rtt)  # std deviation = jitter
+
+            # Remove top+bottom 10% outliers caused by OS scheduling
+            if len(rtts) >= 5:
+                rtts_sorted  = sorted(rtts)
+                trim         = max(1, len(rtts_sorted) // 10)
+                rtts_trimmed = rtts_sorted[trim:-trim]
+            else:
+                rtts_trimmed = rtts
+
+            avg_rtt = sum(rtts_trimmed) / len(rtts_trimmed)
+            med_rtt = _median(rtts_trimmed)
+            jitter  = _std_deviation(rtts_trimmed, avg_rtt)
             quality = _rtt_quality(med_rtt)
 
             return {
@@ -378,27 +445,49 @@ class ImprovedHostState(HostState):
 
 
 def update_improved_state(state: ImprovedHostState, result: dict):
-    """Update state with smart sleep detection."""
-    # Update extra fields
+    """Update state with smart sleep detection + multi-method fallback."""
     state.last_jitter  = result.get("jitter_ms")
     state.last_loss    = result.get("packet_loss")
     state.last_quality = result.get("quality")
     state.last_packets = result.get("packets_sent")
 
-    # Smart sleep detection — override DOWN with SLEEP
     if not result["is_alive"]:
-        sleeping = _is_likely_sleeping(result["host"], state.consecutive_fail + 1)
+        host = result["host"]
+
+        # Method 2 — TCP check (phones/devices blocking ICMP)
+        if _tcp_reachable(host):
+            print(f"  [PROBE] {result['name']} — "
+                  f"ICMP blocked, TCP alive")
+            result["is_alive"]    = True
+            result["quality"]     = "tcp-only"
+            state.last_quality    = "tcp-only"
+            state.is_sleeping     = False
+            update_host_state(state, True, 0.0, None)
+            return
+
+        # Method 3 — ARP check (IoT devices blocking everything)
+        if _arp_reachable(host):
+            print(f"  [PROBE] {result['name']} — "
+                  f"ICMP+TCP blocked, ARP present")
+            result["is_alive"]    = True
+            result["quality"]     = "arp-only"
+            state.last_quality    = "arp-only"
+            state.is_sleeping     = False
+            update_host_state(state, True, 0.0, None)
+            return
+
+        # Sleep detection — still no response from any method
+        sleeping = _is_likely_sleeping(
+            host, state.consecutive_fail + 1)
         if sleeping:
-            state.is_sleeping = True
+            state.is_sleeping      = True
             state.consecutive_fail += 1
             state.consecutive_ok   = 0
-            # Don't mark as DOWN if sleeping
             if state.status not in ("DOWN",):
                 state.status = "DEGRADED"
             return
 
     state.is_sleeping = False
-    # Standard state update
     update_host_state(state, result["is_alive"],
                       result["packet_loss"], result["rtt_avg_ms"])
 

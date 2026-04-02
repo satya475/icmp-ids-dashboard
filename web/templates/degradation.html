@@ -81,6 +81,7 @@
         <thead><tr>
           <th>Priority</th>
           <th>Device</th>
+          <th>Type</th>
           <th>IP</th>
           <th>Current Score</th>
           <th>Baseline Score</th>
@@ -98,10 +99,11 @@
 
   <!-- Router aging chart -->
   <div class="card">
-    <div class="ch">Router Aging Chart
+    <div class="ch">Device Aging Chart
       <span class="muted" style="font-weight:400;font-size:10px">
-        Health score over time — click devices to compare
+        Health score over time for all devices — click to compare
       </span>
+    </div>
     </div>
     <div class="cb">
       <div class="device-selector" id="device-chips"></div>
@@ -183,9 +185,22 @@ async function updateTable(){
     const scoreColor = score>=80?'#22c55e':score>=60?'#3b82f6':score>=40?'#f59e0b':'#ef4444';
     const pred  = d.predicted_critical_date || '—';
     const conf  = d.confidence ? d.confidence.toFixed(0)+'%' : '—';
+const typeColors = {
+      router:'#3b82f6', laptop:'#a855f7', phone:'#f59e0b',
+      server:'#22c55e', iot:'#06b6d4',    tv:'#f97316',
+      printer:'#64748b',unknown:'#374151'
+    };
+    const dtype = (d.device_type||'unknown').toLowerCase();
+    const typeColor = typeColors[dtype] || '#374151';
+    const typeBadge = `<span style="background:${typeColor}22;
+      color:${typeColor};padding:2px 8px;border-radius:20px;
+      font-size:10px;font-weight:600">
+      ${dtype.toUpperCase()}</span>`;
+
     return `<tr style="cursor:pointer" onclick="showDeviceDetail('${d.ip}','${d.name||d.ip}')">
       <td>${pBadge}</td>
       <td style="font-weight:500">${d.name||d.ip}</td>
+      <td>${typeBadge}</td>
       <td style="font-family:monospace;font-size:11px;color:var(--muted)">${d.ip}</td>
       <td><b style="color:${scoreColor}">${score}</b><span style="color:var(--muted);font-size:10px">/100</span></td>
       <td style="color:var(--muted)">${base}</td>
