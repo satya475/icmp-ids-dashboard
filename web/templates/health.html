@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Network Health</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+.sessions-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.session-card{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:20px;cursor:pointer;transition:all .15s}
+.session-card:hover{border-color:var(--blue)}
+.session-card.active{border-color:var(--blue);background:rgba(59,130,246,.05)}
+.score-circle{width:72px;height:72px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;flex-direction:column;flex-shrink:0}
+.score-num{font-size:22px;font-weight:700;line-height:1}
+.score-grade{font-size:11px;font-weight:600;margin-top:2px}
+.grade-a{background:rgba(34,197,94,.15);color:var(--up)}
+.grade-b{background:rgba(59,130,246,.15);color:var(--blue)}
+.grade-c{background:rgba(245,158,11,.15);color:var(--warn)}
+.grade-d{background:rgba(239,68,68,.1);color:var(--down)}
+.grade-f{background:rgba(239,68,68,.2);color:var(--down)}
+.session-info{flex:1;min-width:0}
+.session-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.gateway-badge{font-family:monospace;font-size:12px;background:var(--surface2);
+  padding:2px 8px;border-radius:4px;color:var(--text)}
+.dim-bars{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.dim-bar-wrap{display:flex;flex-direction:column;gap:3px}
+.dim-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.dim-bar-bg{height:5px;background:var(--border);border-radius:3px}
+.dim-bar-fill{height:100%;border-radius:3px;transition:width .5s}
+.dim-val{font-size:10px;color:var(--muted);text-align:right}
+.comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.radar-wrap{position:relative;height:300px}
+.history-wrap{position:relative;height:200px}
+.stat-row{display:flex;justify-content:space-between;padding:7px 0;
+  border-bottom:1px solid var(--border);font-size:12px}
+.stat-row:last-child{border-bottom:none}
+.stat-label{color:var(--muted)}
+.stat-val{font-weight:500}
+.winner-badge{display:inline-block;padding:1px 8px;border-radius:20px;
+  font-size:10px;font-weight:600;background:rgba(34,197,94,.15);color:var(--up)}
+.session-label-input{background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;
+  width:160px;outline:none}
+.session-label-input:focus{border-color:var(--blue)}
+.trend-up{color:var(--down)}
+.trend-down{color:var(--up)}
+.trend-flat{color:var(--muted)}
+.empty{color:var(--muted);padding:24px;text-align:center;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <a href="/" class="nav-link">← Dashboard</a>
+    Network Health
+  </h1>
+  <span id="last-update" style="font-size:11px;color:var(--muted)"></span>
+</header>
+
+<div class="main">
+
+  <!-- Current health -->
+  <div class="row row-2">
+    <div class="card">
+      <div class="ch">Current Session Health</div>
+      <div class="cb">
+        <div style="display:flex;align-items:center;gap:20px">
+          <div class="score-circle grade-a" id="current-circle">
+            <div class="score-num" id="current-score">—</div>
+            <div class="score-grade" id="current-grade">—</div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500;margin-bottom:4px"
+                 id="current-gateway">Waiting for data...</div>
+            <div style="font-size:11px;color:var(--muted)"
+                 id="current-subnet"></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px"
+                 id="current-since"></div>
+          </div>
+        </div>
+        <div class="dim-bars" style="margin-top:16px" id="current-dims"></div>
+        <div style="margin-top:14px;padding:10px 14px;border-radius:8px;
+                    background:var(--surface2);border:1px solid var(--border)"
+             id="trend-box" style="display:none">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Trend (last 20 snapshots)</div>
+          <div style="display:flex;gap:16px;font-size:12px">
+            <span>Direction: <b id="trend-dir">—</b></span>
+            <span>Rate: <b id="trend-rate">—</b> pts/min</span>
+            <span>Predicted (10min): <b id="trend-pred">—</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch">Health Trend (this session)</div>
+      <div class="cb"><div class="history-wrap">
+        <canvas id="trend-chart"></canvas>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- Router recommendation -->
+  <div class="card" id="advisor-card">
+    <div class="ch">Router Advisor <span class="muted" style="font-weight:400;font-size:10px">AI-powered recommendation based on session history</span></div>
+    <div class="cb" id="advisor-body">
+      <div class="empty">Collecting data — use each router for 5+ minutes to get a recommendation</div>
+    </div>
+  </div>
+
+  <!-- Session comparison -->
+  <div class="card">
+    <div class="ch">
+      Router Sessions
+      <span class="muted" style="font-weight:400;font-size:10px">
+        Click two sessions to compare · rename by clicking label
+      </span>
+    </div>
+    <div class="cb">
+      <div class="sessions-grid" id="sessions-grid">
+        <div class="empty">No sessions yet — start monitoring to record sessions</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comparison panel (shown when 2 sessions selected) -->
+  <div class="card" id="compare-panel" style="display:none">
+    <div class="ch">
+      Side-by-side Comparison
+      <button onclick="clearCompare()" style="font-size:11px;color:var(--muted);
+        background:none;border:none;cursor:pointer">Clear</button>
+    </div>
+    <div class="cb">
+      <div class="comparison-grid">
+        <div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:12px"
+               id="cmp-title-a">Session A</div>
+          <div class="radar-wrap">
+            <canvas id="radar-a"></canvas>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:12px"
+               id="cmp-title-b">Session B</div>
+          <div class="radar-wrap">
+            <canvas id="radar-b"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats comparison table -->
+      <div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr 1fr;
+                  gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <div style="background:var(--surface2);padding:10px 14px;font-size:10px;
+                    color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Metric</div>
+        <div style="background:var(--surface2);padding:10px 14px;font-size:11px;
+                    font-weight:600;color:var(--blue)" id="cmp-head-a">Session A</div>
+        <div style="background:var(--surface2);padding:10px 14px;font-size:11px;
+                    font-weight:600;color:var(--up)"  id="cmp-head-b">Session B</div>
+        <div id="cmp-rows" style="display:contents"></div>
+      </div>
+
+      <!-- Winner banner -->
+      <div id="winner-banner" style="margin-top:16px;padding:14px 18px;
+           border-radius:8px;border:1px solid var(--border);display:none">
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const api = url => fetch(url).then(r=>r.json());
+let sessions=[], selectedIds=[], trendChart=null, radarA=null, radarB=null;
+
+// ── Helpers ──────────────────────────────
+function gradeClass(score){
+  if(score>=90)return 'grade-a';
+  if(score>=80)return 'grade-b';
+  if(score>=65)return 'grade-c';
+  if(score>=50)return 'grade-d';
+  return 'grade-f';
+}
+function grade(score){
+  if(score>=90)return 'A';
+  if(score>=80)return 'B';
+  if(score>=65)return 'C';
+  if(score>=50)return 'D';
+  return 'F';
+}
+function dimColor(score){
+  if(score>=80)return '#22c55e';
+  if(score>=60)return '#3b82f6';
+  if(score>=40)return '#f59e0b';
+  return '#ef4444';
+}
+function fmtDuration(start,end){
+  const ms=(end?new Date(end):new Date())-new Date(start);
+  const h=Math.floor(ms/3600000);
+  const m=Math.floor((ms%3600000)/60000);
+  if(h>0)return `${h}h ${m}m`;
+  return `${m}m`;
+}
+function better(a,b,higherIsBetter=true){
+  if(a==null||b==null)return null;
+  return higherIsBetter?(a>b?'a':a<b?'b':'tie'):(a<b?'a':a>b?'b':'tie');
+}
+
+// ── Current session ──────────────────────
+async function updateCurrent(){
+  const data=await api('/api/health/current');
+  if(!data||!data.session){
+    document.getElementById('current-gateway').textContent='Not connected';
+    return;
+  }
+  const s=data.session;
+
+  // Show waiting message for new router
+  if(data.waiting || !data.latest){
+    document.getElementById('current-score').textContent='—';
+    document.getElementById('current-grade').textContent='—';
+    document.getElementById('current-gateway').textContent=
+      s.label||s.gateway_ip||'New router';
+    document.getElementById('current-subnet').textContent=
+      `Subnet: ${s.subnet||'detecting...'}`;
+    document.getElementById('current-since').textContent=
+      data.message||'Collecting health data — check back in 1 minute';
+    document.getElementById('current-dims').innerHTML='';
+    return;
+  }
+  const snap=data.latest;
+
+  const sc=Math.round(snap.health_score||0);
+  const gr=grade(sc);
+  document.getElementById('current-score').textContent=sc;
+  document.getElementById('current-grade').textContent=gr;
+  document.getElementById('current-circle').className='score-circle '+gradeClass(sc);
+  document.getElementById('current-gateway').textContent=s.label||s.gateway_ip;
+  document.getElementById('current-subnet').textContent=`Subnet: ${s.subnet}`;
+  document.getElementById('current-since').textContent=
+    `Active for ${fmtDuration(s.started_at,null)}`;
+
+  const dims=[
+    {label:'RTT',    val:snap.rtt_score},
+    {label:'Loss',   val:snap.loss_score},
+    {label:'Stability',val:snap.stability_score},
+    {label:'Devices',val:snap.device_score},
+  ];
+  document.getElementById('current-dims').innerHTML=dims.map(d=>`
+    <div class="dim-bar-wrap">
+      <div style="display:flex;justify-content:space-between">
+        <span class="dim-label">${d.label}</span>
+        <span class="dim-val">${Math.round(d.val||0)}</span>
+      </div>
+      <div class="dim-bar-bg">
+        <div class="dim-bar-fill" style="width:${d.val||0}%;background:${dimColor(d.val||0)}"></div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('last-update').textContent=
+    'Updated '+new Date().toLocaleTimeString();
+}
+
+// ── Trend chart ──────────────────────────
+async function updateTrend(){
+  const data=await api('/api/health/current');
+  if(!data?.session)return;
+  const hist=await api('/api/health/session/'+data.session.id);
+  if(!hist.length)return;
+  const labels=hist.map(h=>new Date(h.timestamp).toLocaleTimeString());
+  const scores=hist.map(h=>h.health_score||0);
+  trendChart.data.labels=labels;
+  trendChart.data.datasets=[{
+    label:'Health score',
+    data:scores,
+    borderColor:'#3b82f6',
+    backgroundColor:'#3b82f620',
+    borderWidth:2,pointRadius:0,tension:0.3,fill:true
+  }];
+  trendChart.update('none');
+}
+
+// ── Sessions grid ─────────────────────────
+async function updateSessions(){
+  sessions=await api('/api/health/sessions');
+  const grid=document.getElementById('sessions-grid');
+  if(!sessions.length){
+    grid.innerHTML='<div class="empty">No sessions recorded yet</div>';
+    return;
+  }
+  grid.innerHTML=sessions.map(s=>{
+    const sc   =Math.round(s.avg_health||0);
+    const gr   =grade(sc);
+    const gc   =gradeClass(sc);
+    const dur  =fmtDuration(s.started_at,s.ended_at);
+    const isActive=selectedIds.includes(s.id);
+    const dims =[
+      {label:'RTT',    v:s.avg_rtt_score},
+      {label:'Loss',   v:s.avg_loss_score},
+      {label:'Stab',   v:s.avg_stability},
+      {label:'Dev',    v:s.avg_device_score},
+    ];
+    return `<div class="session-card${isActive?' active':''}"
+        onclick="toggleSession(${s.id})">
+      <div class="session-header">
+        <div class="score-circle ${gc}" style="width:56px;height:56px">
+          <div class="score-num" style="font-size:18px">${sc}</div>
+          <div class="score-grade">${gr}</div>
+        </div>
+        <div class="session-info">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <input class="session-label-input" value="${s.label||s.gateway_ip}"
+              onclick="event.stopPropagation()"
+              onchange="renameSession(${s.id},this.value)"
+              title="Click to rename"/>
+            ${!s.ended_at?'<span class="winner-badge">Live</span>':''}
+          </div>
+          <div style="font-size:10px;color:var(--muted)">
+            ${new Date(s.started_at).toLocaleString()} · ${dur}
+          </div>
+          <div style="font-size:10px;color:var(--muted)">
+            ${s.snapshot_count||0} snapshots · Gateway: ${s.gateway_ip}
+          </div>
+        </div>
+      </div>
+      <div class="dim-bars" style="grid-template-columns:repeat(4,1fr)">
+        ${dims.map(d=>`<div class="dim-bar-wrap">
+          <div style="display:flex;justify-content:space-between">
+            <span class="dim-label">${d.label}</span>
+            <span class="dim-val">${Math.round(d.v||0)}</span>
+          </div>
+          <div class="dim-bar-bg">
+            <div class="dim-bar-fill" style="width:${d.v||0}%;background:${dimColor(d.v||0)}"></div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Session selection & comparison ────────
+function toggleSession(id){
+  if(selectedIds.includes(id)){
+    selectedIds=selectedIds.filter(x=>x!==id);
+  } else {
+    if(selectedIds.length>=2) selectedIds.shift();
+    selectedIds.push(id);
+  }
+  updateSessions();
+  if(selectedIds.length===2) showComparison();
+  else document.getElementById('compare-panel').style.display='none';
+}
+
+function clearCompare(){
+  selectedIds=[];
+  updateSessions();
+  document.getElementById('compare-panel').style.display='none';
+}
+
+async function renameSession(id,label){
+  await fetch('/api/health/session/'+id+'/label',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({label})
+  });
+}
+
+function makeRadar(id,scores,label,color){
+  const ctx=document.getElementById(id).getContext('2d');
+  if(id==='radar-a'&&radarA){radarA.destroy();}
+  if(id==='radar-b'&&radarB){radarB.destroy();}
+  const chart=new Chart(ctx,{
+    type:'radar',
+    data:{
+      labels:['RTT','Loss','Stability','Devices'],
+      datasets:[{
+        label,
+        data:[scores.rtt,scores.loss,scores.stability,scores.devices],
+        borderColor:color,
+        backgroundColor:color+'30',
+        borderWidth:2,
+        pointBackgroundColor:color,
+        pointRadius:4,
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{r:{
+        min:0,max:100,
+        ticks:{stepSize:25,color:'#64748b',font:{size:9},backdropColor:'transparent'},
+        grid:{color:'#2a2d3e'},
+        pointLabels:{color:'#e2e8f0',font:{size:11}},
+        angleLines:{color:'#2a2d3e'}
+      }}
+    }
+  });
+  if(id==='radar-a')radarA=chart;
+  else radarB=chart;
+}
+
+async function showComparison(){
+  const [idA,idB]=selectedIds;
+  const sA=sessions.find(s=>s.id===idA);
+  const sB=sessions.find(s=>s.id===idB);
+  if(!sA||!sB)return;
+
+  document.getElementById('compare-panel').style.display='block';
+  document.getElementById('cmp-title-a').textContent=sA.label||sA.gateway_ip;
+  document.getElementById('cmp-title-b').textContent=sB.label||sB.gateway_ip;
+  document.getElementById('cmp-head-a').textContent=sA.label||sA.gateway_ip;
+  document.getElementById('cmp-head-b').textContent=sB.label||sB.gateway_ip;
+
+  const scA={rtt:Math.round(sA.avg_rtt_score||0),loss:Math.round(sA.avg_loss_score||0),
+             stability:Math.round(sA.avg_stability||0),devices:Math.round(sA.avg_device_score||0)};
+  const scB={rtt:Math.round(sB.avg_rtt_score||0),loss:Math.round(sB.avg_loss_score||0),
+             stability:Math.round(sB.avg_stability||0),devices:Math.round(sB.avg_device_score||0)};
+
+  makeRadar('radar-a',scA,sA.label||sA.gateway_ip,'#3b82f6');
+  makeRadar('radar-b',scB,sB.label||sB.gateway_ip,'#22c55e');
+
+  // Stats table
+  const metrics=[
+    {label:'Overall score', a:Math.round(sA.avg_health||0), b:Math.round(sB.avg_health||0), unit:'/ 100', higher:true},
+    {label:'Grade',         a:grade(sA.avg_health||0),      b:grade(sB.avg_health||0),      unit:'',      higher:true},
+    {label:'Avg RTT',       a:sA.avg_rtt?.toFixed(1),       b:sB.avg_rtt?.toFixed(1),       unit:' ms',   higher:false},
+    {label:'Avg packet loss',a:(sA.avg_loss*100)?.toFixed(1),b:(sB.avg_loss*100)?.toFixed(1),unit:'%',    higher:false},
+    {label:'RTT score',     a:Math.round(sA.avg_rtt_score||0), b:Math.round(sB.avg_rtt_score||0), unit:'', higher:true},
+    {label:'Loss score',    a:Math.round(sA.avg_loss_score||0),b:Math.round(sB.avg_loss_score||0),unit:'', higher:true},
+    {label:'Stability',     a:Math.round(sA.avg_stability||0), b:Math.round(sB.avg_stability||0), unit:'', higher:true},
+    {label:'Device score',  a:Math.round(sA.avg_device_score||0),b:Math.round(sB.avg_device_score||0),unit:'',higher:true},
+    {label:'Duration',      a:fmtDuration(sA.started_at,sA.ended_at), b:fmtDuration(sB.started_at,sB.ended_at), unit:'', higher:null},
+    {label:'Snapshots',     a:sA.snapshot_count, b:sB.snapshot_count, unit:'', higher:null},
+  ];
+
+  const borderStyle='1px solid var(--border)';
+  document.getElementById('cmp-rows').innerHTML=metrics.map(m=>{
+    let winA='', winB='';
+    if(m.higher!==null){
+      const w=better(parseFloat(m.a),parseFloat(m.b),m.higher);
+      if(w==='a') winA=' style="color:var(--up);font-weight:600"';
+      if(w==='b') winB=' style="color:var(--up);font-weight:600"';
+    }
+    return `
+      <div style="padding:8px 14px;font-size:11px;color:var(--muted);border-top:${borderStyle}">${m.label}</div>
+      <div style="padding:8px 14px;font-size:12px;border-top:${borderStyle}"${winA}>${m.a??'—'}${m.unit}</div>
+      <div style="padding:8px 14px;font-size:12px;border-top:${borderStyle}"${winB}>${m.b??'—'}${m.unit}</div>`;
+  }).join('');
+
+  // Winner banner
+  const scoreA=sA.avg_health||0, scoreB=sB.avg_health||0;
+  const diff=Math.abs(scoreA-scoreB);
+  const winner=scoreA>scoreB?sA:scoreB>scoreA?sB:null;
+  const banner=document.getElementById('winner-banner');
+  if(winner&&diff>2){
+    const loser=winner===sA?sB:sA;
+    banner.style.display='block';
+    banner.style.background=scoreA>scoreB?'rgba(59,130,246,.08)':'rgba(34,197,94,.08)';
+    banner.style.borderColor=scoreA>scoreB?'rgba(59,130,246,.3)':'rgba(34,197,94,.3)';
+    banner.innerHTML=`
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">
+        ${winner.label||winner.gateway_ip} performs better
+        <span class="winner-badge" style="margin-left:8px">+${diff.toFixed(0)} points</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">
+        Overall score: ${Math.round(winner.avg_health||0)} vs ${Math.round(loser.avg_health||0)}.
+        ${diff>20?'Significant performance difference detected.':
+          diff>10?'Moderate performance difference.':
+          'Small difference — both routers performing similarly.'}
+      </div>`;
+  } else {
+    banner.style.display=winner?'block':'none';
+    if(!winner) banner.innerHTML='Both routers have equal performance scores.';
+  }
+
+  document.getElementById('compare-panel').scrollIntoView({behavior:'smooth'});
+}
+
+// ── Init charts ───────────────────────────
+function initTrendChart(){
+  trendChart=new Chart(document.getElementById('trend-chart').getContext('2d'),{
+    type:'line',data:{labels:[],datasets:[]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#64748b',maxTicksLimit:6,font:{size:10}},grid:{color:'#1a1d27'}},
+        y:{min:0,max:100,ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1a1d27'},
+           title:{display:true,text:'Health score',color:'#64748b',font:{size:10}}}
+      }}
+  });
+}
+
+// ── Refresh ───────────────────────────────
+async function refresh(){
+  await updateCurrent();
+  await updateTrend();
+  await updateSessions();
+}
+initTrendChart();
+refreshAll();
+setInterval(refreshAll,10000);
+
+async function updateAdvisor(){
+  const r=await api('/api/health/recommendation');
+  const el=document.getElementById('advisor-body');
+  if(!r||!r.recommendation){
+    el.innerHTML=`<div class="empty">${(r.reasoning||['Collecting data...']).join(' ')}</div>`;
+    return;
+  }
+  const confColor=r.confidence>=80?'var(--up)':r.confidence>=60?'var(--warn)':'var(--muted)';
+  el.innerHTML=`
+    <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:18px;font-weight:700;margin-bottom:6px">
+          Use <span style="color:var(--blue)">${r.best_label}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
+          Confidence: <span style="color:${confColor};font-weight:600">${r.confidence}%</span>
+          ${r.score_diff>0?`· Score advantage: +${r.score_diff} points`:''}
+        </div>
+        ${r.reasoning.map(reason=>`
+          <div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px">
+            <span style="color:var(--up);flex-shrink:0">✓</span>
+            <span style="color:var(--muted)">${reason}</span>
+          </div>`).join('')}
+      </div>
+      ${r.sessions.length>=2?`
+      <div style="display:grid;grid-template-columns:repeat(${r.sessions.length},1fr);gap:12px;min-width:300px">
+        ${r.sessions.map(s=>`
+          <div style="background:var(--surface2);border:1px solid var(--border);
+               ${s.gateway===r.recommendation?'border-color:var(--blue);':''}
+               border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:11px;font-weight:600;margin-bottom:8px;
+                 color:${s.gateway===r.recommendation?'var(--blue)':'var(--text)'}">${s.label}</div>
+            <div style="font-size:22px;font-weight:700;
+                 color:${s.overall>=80?'#22c55e':s.overall>=60?'#f59e0b':'#ef4444'}">${Math.round(s.overall)}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:4px">/100</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:8px">${s.snapshots} snapshots</div>
+          </div>`).join('')}
+      </div>`:''}
+    </div>`;
+}
+
+async function updateTrendBox(){
+  const data=await api('/api/health/current');
+  if(!data?.session)return;
+  const trend=await api('/api/health/trend/'+data.session.id);
+  if(!trend||!trend.trend)return;
+  const trendColors={'improving':'var(--up)','stable':'var(--muted)','declining':'var(--down)'};
+  const c=trendColors[trend.trend]||'var(--muted)';
+  document.getElementById('trend-box').style.display='block';
+  document.getElementById('trend-dir').innerHTML=
+    `<span style="color:${c}">${trend.trend}</span>`;
+  document.getElementById('trend-rate').textContent=
+    (trend.trend_rate>0?'+':'')+trend.trend_rate;
+  document.getElementById('trend-pred').innerHTML=
+    trend.prediction_10m!=null
+    ?`<span style="color:${c}">${trend.prediction_10m}/100</span>`:'—';
+}
+
+// Extend refresh to include advisor and trend
+async function refreshAll(){
+  await refresh();
+  await updateAdvisor();
+  await updateTrendBox();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IDS — Network Monitor</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<style>
+/* ── Status Section ── */
+.network-status{border-radius:var(--r);padding:20px 24px;
+  margin-bottom:20px;border:1px solid;display:flex;
+  align-items:center;gap:16px}
+.status-safe{background:rgba(34,197,94,.08);
+  border-color:rgba(34,197,94,.3)}
+.status-attack{background:rgba(239,68,68,.08);
+  border-color:rgba(239,68,68,.3)}
+.status-icon{font-size:36px;flex-shrink:0}
+.status-title{font-size:20px;font-weight:700;margin-bottom:4px}
+.status-safe .status-title{color:#22c55e}
+.status-attack .status-title{color:#ef4444}
+.status-sub{font-size:13px;color:var(--muted)}
+
+/* ── Groups ── */
+.groups{display:grid;grid-template-columns:repeat(3,1fr);
+  gap:16px;margin-bottom:20px}
+.group{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:20px}
+.group-title{font-size:12px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.05em;margin-bottom:16px;padding-bottom:8px;
+  border-bottom:1px solid var(--border)}
+.group-title.g1{color:#60a5fa}
+.group-title.g2{color:#f87171}
+.group-title.g3{color:#a78bfa}
+.stat-row{display:flex;justify-content:space-between;
+  align-items:center;padding:6px 0;
+  border-bottom:1px solid var(--border);font-size:13px}
+.stat-row:last-child{border-bottom:none}
+.stat-label{color:var(--muted)}
+.stat-value{font-weight:600;color:var(--text);
+  font-family:monospace;font-size:12px}
+.val-green{color:#22c55e}
+.val-red{color:#ef4444}
+.val-blue{color:#60a5fa}
+.val-purple{color:#a78bfa}
+.val-yellow{color:#fbbf24}
+
+/* ── IDS Stats ── */
+.ids-stats{display:grid;grid-template-columns:repeat(4,1fr);
+  gap:10px;margin-bottom:20px}
+.ids-card{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:20px}
+.ids-card .lbl{font-size:12px;color:var(--muted);
+  margin-bottom:6px;text-transform:uppercase}
+.ids-card .val{font-size:36px;font-weight:700}
+.val-total{color:#60a5fa}
+.val-critical{color:#f87171}
+.val-high{color:#fb923c}
+.val-medium{color:#fbbf24}
+
+/* ── Table ── */
+.ids-table-wrap{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden}
+.ids-table-header{padding:14px 20px;border-bottom:1px solid var(--border);
+  font-size:14px;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{padding:10px 14px;text-align:left;color:var(--muted);
+  font-size:11px;text-transform:uppercase;
+  border-bottom:1px solid var(--border)}
+tbody tr{border-bottom:1px solid var(--border)}
+tbody tr:hover{background:var(--surface2)}
+tbody td{padding:10px 14px;color:var(--text)}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;
+  font-size:10px;font-weight:700;text-transform:uppercase}
+.badge-critical{background:rgba(248,113,113,.15);color:#f87171;
+  border:1px solid rgba(248,113,113,.3)}
+.badge-high{background:rgba(251,146,60,.15);color:#fb923c;
+  border:1px solid rgba(251,146,60,.3)}
+.badge-medium{background:rgba(251,191,36,.15);color:#fbbf24;
+  border:1px solid rgba(251,191,36,.3)}
+.badge-low{background:rgba(74,222,128,.15);color:#4ade80;
+  border:1px solid rgba(74,222,128,.3)}
+.source-sig{background:rgba(96,165,250,.15);color:#60a5fa;
+  padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600}
+.source-ml{background:rgba(167,139,250,.15);color:#a78bfa;
+  padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600}
+.no-alerts{padding:40px;text-align:center;
+  color:var(--muted);font-size:13px}
+.msg-cell{max-width:280px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Status bar ── */
+.status-bar{background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:14px 20px;margin-bottom:20px;
+  display:flex;align-items:center;gap:12px;font-size:13px}
+.dot-ids{width:10px;height:10px;border-radius:50%;
+  background:#22c55e;animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot-live"></span> Network Monitor</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <a href="/"            class="nav-link">Dashboard →</a>
+    <a href="/bandwidth"   class="nav-link">Bandwidth →</a>
+    <a href="/reports"     class="nav-link">Reports →</a>
+    <a href="/health"      class="nav-link">Health →</a>
+    <a href="/insights"    class="nav-link">AI Insights →</a>
+    <a href="/degradation" class="nav-link">Degradation →</a>
+    <a href="/ids"         class="nav-link" style="color:#f87171">IDS →</a>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Page title -->
+  <div style="margin-bottom:20px">
+    <h2 style="font-size:20px;font-weight:600;margin-bottom:4px">
+      🛡️ Intrusion Detection System
+    </h2>
+    <p style="font-size:13px;color:var(--muted)">
+      Hybrid IDS — Signature + ML based detection ·
+      Auto-refreshes every 10 seconds ·
+      Last updated: {{ last_updated }}
+    </p>
+  </div>
+
+  <!-- IDS Engine status bar -->
+  <div class="status-bar">
+    <div class="dot-ids"></div>
+    <span style="color:var(--muted)">
+      IDS Engine:
+      <span style="color:#22c55e;font-weight:600">ACTIVE</span> ·
+      Signature Rules:
+      <span style="color:#60a5fa;font-weight:600">
+        {{ realtime.rules_loaded }} rules loaded
+      </span> ·
+      ML Model:
+      <span style="color:#a78bfa;font-weight:600">Isolation Forest</span> ·
+      Uptime:
+      <span style="color:#fbbf24;font-weight:600">
+        {{ realtime.ids_uptime }}
+      </span>
+    </span>
+  </div>
+
+  <!-- Network Status Banner -->
+  {% if realtime.is_safe %}
+  <div class="network-status status-safe">
+    <div class="status-icon">🟢</div>
+    <div>
+      <div class="status-title">Network is SAFE</div>
+      <div class="status-sub">
+        No critical or high severity attacks detected ·
+        IDS is actively monitoring all traffic ·
+        Last alert: {{ realtime.last_alert_ago }}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="network-status status-attack">
+    <div class="status-icon">🔴</div>
+    <div>
+      <div class="status-title">⚠️ ATTACK DETECTED!</div>
+      <div class="status-sub">
+        Suspicious activity found on your network ·
+        Last attack: {{ realtime.last_alert_type }} ·
+        Most suspicious IP: {{ realtime.most_suspicious_ip }}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Three Groups -->
+  <div class="groups">
+
+    <!-- Group 1 — Traffic Info -->
+    <div class="group">
+      <div class="group-title g1">📦 Traffic Info</div>
+      <div class="stat-row">
+        <span class="stat-label">Total packets captured</span>
+        <span class="stat-value val-blue">
+          {{ realtime.total_packets | int }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Packets per second</span>
+        <span class="stat-value val-blue">
+          {{ realtime.packets_per_sec }}/s
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Active IPs detected</span>
+        <span class="stat-value val-blue">
+          {{ realtime.active_ips }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Data sent</span>
+        <span class="stat-value val-green">
+          ⬆️ {{ realtime.bytes_sent }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Data received</span>
+        <span class="stat-value val-green">
+          ⬇️ {{ realtime.bytes_received }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Group 2 — Alert Info -->
+    <div class="group">
+      <div class="group-title g2">🚨 Alert Info</div>
+      <div class="stat-row">
+        <span class="stat-label">Alerts this session</span>
+        <span class="stat-value val-red">
+          {{ realtime.alerts_last_hour }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Time since last alert</span>
+        <span class="stat-value val-yellow">
+          {{ realtime.last_alert_ago }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Last attack type</span>
+        <span class="stat-value val-red">
+          {{ realtime.last_alert_type }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Most suspicious IP</span>
+        <span class="stat-value val-red">
+          {{ realtime.most_suspicious_ip }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Total alerts (log)</span>
+        <span class="stat-value val-yellow">
+          {{ stats.total }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Group 3 — IDS Engine Info -->
+    <div class="group">
+      <div class="group-title g3">⚙️ IDS Engine Info</div>
+      <div class="stat-row">
+        <span class="stat-label">Signature IDS</span>
+        <span class="stat-value val-green">
+          ✅ {{ realtime.signature_status }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">ML IDS</span>
+        <span class="stat-value val-green">
+          ✅ {{ realtime.ml_status }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">IDS running since</span>
+        <span class="stat-value val-purple">
+          {{ realtime.ids_uptime }}
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Rules loaded</span>
+        <span class="stat-value val-purple">
+          {{ realtime.rules_loaded }} rules
+        </span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">ML Model</span>
+        <span class="stat-value val-purple">
+          Isolation Forest
+        </span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Alert count cards -->
+  <div class="ids-stats">
+    <div class="ids-card">
+      <div class="lbl">Total Alerts</div>
+      <div class="val val-total">{{ stats.total }}</div>
+    </div>
+    <div class="ids-card">
+      <div class="lbl">Critical</div>
+      <div class="val val-critical">{{ stats.critical }}</div>
+    </div>
+    <div class="ids-card">
+      <div class="lbl">High</div>
+      <div class="val val-high">{{ stats.high }}</div>
+    </div>
+    <div class="ids-card">
+      <div class="lbl">Medium</div>
+      <div class="val val-medium">{{ stats.medium }}</div>
+    </div>
+  </div>
+
+  <!-- Alert table -->
+  <div class="ids-table-wrap">
+    <div class="ids-table-header">
+      🚨 Recent Alerts
+      <span style="font-size:11px;color:var(--muted);
+        font-weight:400;margin-left:8px">
+        Showing last 50 alerts
+      </span>
+    </div>
+
+    {% if alerts %}
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Severity</th>
+          <th>Rule</th>
+          <th>Source IP</th>
+          <th>Destination IP</th>
+          <th>Detected By</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in alerts %}
+        <tr>
+          <td style="font-family:monospace;color:var(--muted)">
+            {{ alert.timestamp[11:19] if alert.timestamp else "—" }}
+          </td>
+          <td>
+            <span class="badge badge-{{ alert.severity }}">
+              {{ alert.severity }}
+            </span>
+          </td>
+          <td style="font-family:monospace;font-size:11px">
+            {{ alert.rule }}
+          </td>
+          <td style="font-family:monospace">{{ alert.src_ip }}</td>
+          <td style="font-family:monospace">{{ alert.dst_ip }}</td>
+          <td>
+            {% if alert.source == "signature" %}
+              <span class="source-sig">signature</span>
+            {% elif alert.source == "ml" %}
+              <span class="source-ml">ml</span>
+            {% else %}
+              <span style="color:var(--muted)">
+                {{ alert.source }}
+              </span>
+            {% endif %}
+          </td>
+          <td class="msg-cell" title="{{ alert.message }}">
+            {{ alert.message }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="no-alerts">
+      ✅ No alerts detected — network looks clean!
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<script>
+  // Auto refresh every 10 seconds
+  setTimeout(() => location.reload(), 10000);
+</script>
+
+</body>
+</html>

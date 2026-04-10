@@ -1,0 +1,63 @@
+/* style.css — shared styles for all pages */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#20243a;--border:#2a2d3e;
+  --text:#e2e8f0;--muted:#64748b;
+  --up:#22c55e;--down:#ef4444;--warn:#f59e0b;--unknown:#64748b;--blue:#3b82f6;
+  --r:10px;
+}
+body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;font-size:13px}
+header{padding:14px 24px;border-bottom:1px solid var(--border);display:flex;
+  align-items:center;justify-content:space-between;position:sticky;top:0;
+  background:var(--bg);z-index:10}
+header h1{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+.dot-live{width:8px;height:8px;border-radius:50%;background:var(--up);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.main{padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+.row{display:grid;gap:18px}
+.row-2{grid-template-columns:1fr 1fr}
+.row-73{grid-template-columns:3fr 1.2fr}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.ch{padding:11px 16px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;
+    display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cb{padding:16px}
+.muted{color:var(--muted)}
+.btn{padding:8px 18px;border-radius:6px;border:none;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-start{background:var(--up);color:#fff}.btn-start:hover{background:#16a34a}
+.btn-start:disabled{background:#1a3a2a;color:#2d5a3d;cursor:not-allowed}
+.btn-stop{background:var(--down);color:#fff}.btn-stop:hover{background:#b91c1c}
+.btn-stop:disabled{background:#3a1a1a;color:#6b2222;cursor:not-allowed}
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}
+.b-up{background:rgba(34,197,94,.15);color:var(--up)}
+.b-down{background:rgba(239,68,68,.15);color:var(--down)}
+.b-unknown{background:rgba(100,116,139,.15);color:var(--unknown)}
+.vendor-pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;
+             background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
+.uptime-bar{width:50px;height:4px;background:var(--border);border-radius:2px;
+            display:inline-block;vertical-align:middle;margin-left:6px}
+.uptime-fill{height:100%;border-radius:2px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase;
+   letter-spacing:.06em;padding:9px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+.clickable-row:hover td{background:rgba(255,255,255,.025);cursor:pointer}
+.clickable-row.sel td{background:rgba(59,130,246,.08)}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px}
+.stat .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.stat .val{font-size:28px;font-weight:700}
+.val.c-up{color:var(--up)}.val.c-down{color:var(--down)}.val.c-warn{color:var(--warn)}.val.c-blue{color:var(--blue)}
+.chip{padding:2px 9px;border-radius:20px;border:1px solid var(--border);
+      font-size:10px;cursor:pointer;color:var(--muted);transition:all .15s}
+.chip.on{border-color:var(--blue);color:var(--blue);background:rgba(59,130,246,.1)}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chart-wrap{position:relative;height:190px}
+.empty{color:var(--muted);padding:16px;font-size:12px}
+.nav-link{font-size:12px;color:var(--blue);text-decoration:none;
+  padding:4px 10px;border:1px solid var(--border);border-radius:6px}
+.nav-link:hover{background:var(--surface)}
+#tooltip{position:fixed;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;font-size:11px;pointer-events:none;
+  opacity:0;transition:opacity .15s;z-index:100;min-width:160px;line-height:1.8}
+#tooltip.show{opacity:1}
+#tooltip .tt-name{font-weight:600;font-size:13px;margin-bottom:4px}
