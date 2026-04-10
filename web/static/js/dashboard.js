@@ -284,86 +284,236 @@ async function updateTopology(){
 
 function drawTopology(){
   const svg=document.getElementById('topo-svg');
-  const W=svg.clientWidth||700,H=svg.clientHeight||360;
+  const W=svg.clientWidth||700,H=svg.clientHeight||340;
   const {nodes,edges}=topo;
   if(!nodes.length){
-    svg.innerHTML='<text x="50%" y="50%" text-anchor="middle" fill="#64748b" font-size="13">No devices yet</text>';
+    svg.innerHTML=`
+      <defs>
+        <linearGradient id="emptyGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#37b0ff" stop-opacity=".3"/>
+          <stop offset="100%" stop-color="#37b0ff" stop-opacity=".05"/>
+        </linearGradient>
+      </defs>
+      <g transform="translate(${W/2},${H/2-20})">
+        <circle r="40" fill="url(#emptyGrad)" stroke="#37b0ff" stroke-width=".5" opacity=".4"/>
+        <circle r="28" fill="none" stroke="#37b0ff" stroke-width=".3" stroke-dasharray="4 4" opacity=".3"/>
+        <text y="4" text-anchor="middle" fill="#37b0ff" font-size="20" opacity=".5">⬡</text>
+        <text y="65" text-anchor="middle" fill="#64748b" font-size="13" font-weight="500">No devices discovered yet</text>
+        <text y="82" text-anchor="middle" fill="#4d6284" font-size="11">Start monitoring to see your network</text>
+      </g>`;
     return;
   }
 
   const router=nodes.find(n=>n.is_router)||nodes[0];
   const others=nodes.filter(n=>n.id!==router.id);
-  const cx=W/2,cy=H/2,R=Math.min(W,H)*0.38;
+  const cx=W/2,cy=H/2,R=Math.min(W,H)*0.36;
   const pos={[router.id]:{x:cx,y:cy}};
   others.forEach((n,i)=>{
     const a=(2*Math.PI*i/Math.max(others.length,1))-Math.PI/2;
     pos[n.id]={x:cx+R*Math.cos(a),y:cy+R*Math.sin(a)};
   });
 
-  let html='';
+  // Build SVG defs for gradients and filters
+  let defs='<defs>';
+  // Glow filter
+  defs+=`<filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="6" result="blur"/>
+    <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+  </filter>`;
+  defs+=`<filter id="glowStrong" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="10" result="blur"/>
+    <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+  </filter>`;
+  // Node gradients per status
+  const statusGradients={up:['#22c55e','#16a34a'],down:['#ef4444','#dc2626'],degraded:['#f59e0b','#d97706'],unknown:['#64748b','#475569']};
+  Object.entries(statusGradients).forEach(([key,[c1,c2]])=>{
+    defs+=`<radialGradient id="ng-${key}" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="${c1}" stop-opacity=".25"/>
+      <stop offset="100%" stop-color="${c2}" stop-opacity=".08"/>
+    </radialGradient>`;
+    defs+=`<radialGradient id="halo-${key}" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="${c1}" stop-opacity=".15"/>
+      <stop offset="100%" stop-color="${c1}" stop-opacity="0"/>
+    </radialGradient>`;
+  });
+  // Arrow marker
+  defs+=`<marker id="flowArrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+    <circle cx="3" cy="3" r="2" fill="#37b0ff" opacity=".6"/>
+  </marker>`;
+  defs+='</defs>';
 
-  // Draw edges — if hops exist, show intermediate points
-  edges.forEach(e=>{
+  let html=defs;
+
+  // -- Draw edges with curved paths, animated flow, and traveling packets --
+  edges.forEach((e,idx)=>{
     const a=pos[e.from],b=pos[e.to];
     if(!a||!b)return;
-    const nd    =nodes.find(n=>n.id===e.to);
-    const c     =SC[nd?.status]||SC.unknown;
+    const nd=nodes.find(n=>n.id===e.to);
+    const st=nd?.status||'unknown';
+    const c=SC[st]||SC.unknown;
     const devHops=hops[e.to]||[];
 
-    if(devHops.length<=1){
-      // Simple direct line
-      html+=`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
-        stroke="${c}44" stroke-width="1.5"/>`;
-    } else {
-      // Draw hop points along the path
+    // Compute control point for curved path
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const len=Math.sqrt(dx*dx+dy*dy)||1;
+    const curvature=0.15;
+    const cpx=mx+(-dy/len)*len*curvature;
+    const cpy=my+(dx/len)*len*curvature;
+    const pathD=`M${a.x},${a.y} Q${cpx},${cpy} ${b.x},${b.y}`;
+    const pathId=`edge-path-${idx}`;
+
+    // Hidden path for motion reference
+    html+=`<path id="${pathId}" d="${pathD}" fill="none" stroke="none"/>`;
+
+    // Background glow path
+    html+=`<path d="${pathD}" fill="none" stroke="${c}" stroke-width="4" opacity=".06"/>`;
+    // Main edge with draw-in animation
+    html+=`<path d="${pathD}" fill="none" stroke="${c}" stroke-width="1.5" opacity=".35"
+      stroke-linecap="round" stroke-dasharray="1000" stroke-dashoffset="1000"
+      style="animation:edgeDrawIn 1.2s ease ${idx*0.1}s forwards"/>`;
+    // Animated flow dash
+    html+=`<path d="${pathD}" fill="none" stroke="${c}" stroke-width="1" opacity=".5"
+      stroke-dasharray="4 12" stroke-linecap="round"
+      style="animation:flowDash ${2+idx*0.3}s linear infinite"/>`;
+
+    // Traveling data packet dot along the edge
+    const packetDur=3+idx*0.5;
+    html+=`<circle r="2.5" fill="${c}" opacity=".8">
+      <animateMotion dur="${packetDur}s" repeatCount="indefinite" rotate="auto">
+        <mpath href="#${pathId}"/>
+      </animateMotion>
+      <animate attributeName="opacity" values=".9;.4;.9" dur="${packetDur}s" repeatCount="indefinite"/>
+    </circle>`;
+    // Second packet with offset timing for busier look
+    if(st==='up'){
+      html+=`<circle r="2" fill="${c}" opacity=".5">
+        <animateMotion dur="${packetDur*1.3}s" repeatCount="indefinite" rotate="auto"
+          begin="${packetDur*0.5}s">
+          <mpath href="#${pathId}"/>
+        </animateMotion>
+        <animate attributeName="opacity" values=".5;.2;.5" dur="${packetDur*1.3}s"
+          repeatCount="indefinite" begin="${packetDur*0.5}s"/>
+      </circle>`;
+    }
+
+    // Draw small hop dots along the path with pulsing animation
+    if(devHops.length>1){
       const validHops=devHops.filter(h=>h.hop_ip);
       validHops.forEach((h,i)=>{
-        // Interpolate position along the line
         const t=(i+1)/(validHops.length+1);
-        const hx=a.x+(b.x-a.x)*t;
-        const hy=a.y+(b.y-a.y)*t;
-        // Draw small hop dot
-        html+=`<circle cx="${hx}" cy="${hy}" r="4"
-          fill="#1a1d27" stroke="#f59e0b" stroke-width="1.5"
-          title="${h.hop_ip}"/>`;
-        // Hop IP label
-        html+=`<text x="${hx+8}" y="${hy-6}" font-size="9" fill="#f59e0b"
-          font-family="monospace">${h.hop_ip}</text>`;
+        const tt=1-t;
+        const hx=tt*tt*a.x+2*tt*t*cpx+t*t*b.x;
+        const hy=tt*tt*a.y+2*tt*t*cpy+t*t*b.y;
+        html+=`<circle cx="${hx}" cy="${hy}" r="3"
+          fill="rgba(10,20,36,.9)" stroke="#f59e0b" stroke-width="1">
+          <animate attributeName="r" values="3;4;3" dur="2s" begin="${i*0.4}s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values=".5;.9;.5" dur="2s" begin="${i*0.4}s" repeatCount="indefinite"/>
+        </circle>`;
+        html+=`<circle cx="${hx}" cy="${hy}" r="1.5" fill="#f59e0b" opacity=".6"/>`;
       });
-      // Draw the line itself
-      html+=`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
-        stroke="${c}33" stroke-width="1" stroke-dasharray="3 3"/>`;
     }
   });
 
-  // Draw nodes
-  nodes.forEach(n=>{
+  // -- Draw nodes --
+  nodes.forEach((n,nIdx)=>{
     const p=pos[n.id];if(!p)return;
-    const c=SC[n.status]||SC.unknown,r=n.is_router?28:20;
-    const lbl=n.label.length>11?n.label.slice(0,10)+'…':n.label;
-    const rtt=n.rtt?n.rtt+'ms':'—';
-    const up=n.uptime!=null?n.uptime+'%':'';
+    const st=n.status||'unknown';
+    const c=SC[st]||SC.unknown;
+    const r=n.is_router?30:20;
+    // Short, clean labels — no IP clutter
+    const lbl=n.label.length>10?n.label.slice(0,9)+'…':n.label;
     const enc=JSON.stringify({
       name:n.label,ip:n.ip,vendor:n.vendor,mac:n.mac,
       rtt:n.rtt,loss:n.loss,uptime:n.uptime,status:n.status,
       hops:(hops[n.id]||[]).length
     }).replace(/"/g,'&quot;');
-    html+=`<g style="cursor:pointer"
+
+    html+=`<g class="topo-node" style="cursor:pointer;transform-origin:${p.x}px ${p.y}px"
         onclick="selectDevice('${n.id}','${n.label}')"
         onmouseenter="showTip(event,'${enc}')"
-        onmouseleave="hideTip()">
-      <circle cx="${p.x}" cy="${p.y}" r="${r}"
-        fill="${c}18" stroke="${c}" stroke-width="1.5"/>
-      ${n.is_router?`<circle cx="${p.x}" cy="${p.y}" r="${r+5}"
-        fill="none" stroke="${c}" stroke-width="0.5"
-        stroke-dasharray="3 3" opacity="0.5"/>`:''}
-      <text x="${p.x}" y="${p.y+4}" text-anchor="middle"
-        font-size="10" fill="${c}" font-weight="600">${lbl}</text>
-      <text x="${p.x}" y="${p.y+r+13}" text-anchor="middle"
-        font-size="9" fill="#64748b">${rtt}</text>
-      ${up?`<text x="${p.x}" y="${p.y+r+23}" text-anchor="middle"
-        font-size="9" fill="#64748b">${up}</text>`:''}
-    </g>`;
+        onmouseleave="hideTip()">`;
+
+    // Outer breathing glow halo
+    html+=`<circle cx="${p.x}" cy="${p.y}" r="${r+16}"
+      fill="url(#halo-${st})">
+      <animate attributeName="opacity" values=".3;.6;.3" dur="${3+nIdx*0.2}s" repeatCount="indefinite"/>
+    </circle>`;
+
+    // Animated pulse ring (for online devices)
+    if(st==='up'){
+      html+=`<circle cx="${p.x}" cy="${p.y}" r="${r+3}"
+        fill="none" stroke="${c}" stroke-width="1" opacity="0">
+        <animate attributeName="r" from="${r+3}" to="${r+20}" dur="2.5s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" from=".4" to="0" dur="2.5s" repeatCount="indefinite"/>
+      </circle>`;
+      // Second pulse ring staggered for layered heartbeat
+      html+=`<circle cx="${p.x}" cy="${p.y}" r="${r+3}"
+        fill="none" stroke="${c}" stroke-width=".6" opacity="0">
+        <animate attributeName="r" from="${r+3}" to="${r+20}" dur="2.5s" begin="1.25s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" from=".25" to="0" dur="2.5s" begin="1.25s" repeatCount="indefinite"/>
+      </circle>`;
+    }
+    // Down devices get a slow warning pulse
+    if(st==='down'){
+      html+=`<circle cx="${p.x}" cy="${p.y}" r="${r+2}"
+        fill="none" stroke="${c}" stroke-width="1.5" opacity="0">
+        <animate attributeName="r" from="${r+2}" to="${r+14}" dur="1.8s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" from=".6" to="0" dur="1.8s" repeatCount="indefinite"/>
+      </circle>`;
+    }
+
+    if(n.is_router){
+      // Rotating scanner ring around router
+      html+=`<circle cx="${p.x}" cy="${p.y}" r="${r+8}"
+        fill="none" stroke="${c}" stroke-width=".6"
+        stroke-dasharray="8 14 4 14" opacity=".4"
+        style="transform-origin:${p.x}px ${p.y}px;animation:scannerSpin 12s linear infinite"/>`;
+
+      // Hexagonal router shape
+      const hex=[];
+      for(let i=0;i<6;i++){
+        const angle=Math.PI/6+i*Math.PI/3;
+        hex.push(`${p.x+r*Math.cos(angle)},${p.y+r*Math.sin(angle)}`);
+      }
+      html+=`<polygon points="${hex.join(' ')}"
+        fill="url(#ng-${st})" stroke="${c}" stroke-width="2"
+        filter="url(#glow)"/>`;
+      // Inner hexagon
+      const hexInner=[];
+      for(let i=0;i<6;i++){
+        const angle=Math.PI/6+i*Math.PI/3;
+        hexInner.push(`${p.x+(r-6)*Math.cos(angle)},${p.y+(r-6)*Math.sin(angle)}`);
+      }
+      html+=`<polygon points="${hexInner.join(' ')}"
+        fill="none" stroke="${c}" stroke-width=".5" opacity=".3"/>`;
+      // Router icon
+      html+=`<text x="${p.x}" y="${p.y+4}" text-anchor="middle"
+        font-size="14" fill="${c}" opacity=".8">⬡</text>`;
+    } else {
+      // Regular device: circle with gradient
+      html+=`<circle cx="${p.x}" cy="${p.y}" r="${r}"
+        fill="url(#ng-${st})" stroke="${c}" stroke-width="1.5"
+        filter="url(#glow)"/>`;
+      // Inner ring
+      html+=`<circle cx="${p.x}" cy="${p.y}" r="${r-4}"
+        fill="none" stroke="${c}" stroke-width=".4" opacity=".2"/>`;
+      // Status indicator dot with breathing
+      html+=`<circle cx="${p.x+r*0.55}" cy="${p.y-r*0.55}" r="3.5"
+        fill="${c}" stroke="rgba(6,14,28,.8)" stroke-width="1.5">
+        <animate attributeName="r" values="3.5;4.2;3.5" dur="2s" repeatCount="indefinite"/>
+      </circle>`;
+    }
+
+    // Label pill — positioned below the node with enough gap
+    const lblW=lbl.length*6.2+14;
+    html+=`<rect x="${p.x-lblW/2}" y="${p.y+r+5}" width="${lblW}" height="16"
+      rx="8" fill="rgba(6,14,28,.88)" stroke="${c}33" stroke-width=".5"/>`;
+    html+=`<text x="${p.x}" y="${p.y+r+16}" text-anchor="middle"
+      font-size="9" fill="${c}" font-weight="600"
+      font-family="'Manrope',sans-serif">${lbl}</text>`;
+
+    html+='</g>';
   });
 
   svg.innerHTML=html;
@@ -494,19 +644,17 @@ async function updateActivity(){
   const el     = document.getElementById('activity-feed');
   if(!el) return;
   if(!events.length){
-    el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 16px">No recent activity</div>';
+    el.innerHTML='<div class="activity-empty">No recent activity</div>';
     return;
   }
   el.innerHTML = events.map(e=>{
     const ts  = new Date(e.timestamp).toLocaleTimeString();
-    const dot = `<span style="width:7px;height:7px;border-radius:50%;
-      background:${e.color};display:inline-block;flex-shrink:0;margin-top:4px"></span>`;
-    return `<div style="display:flex;align-items:flex-start;gap:10px;
-      padding:6px 16px;border-bottom:1px solid var(--border)">
+    const dot = `<span class="activity-dot" style="background:${e.color}"></span>`;
+    return `<div class="activity-item">
       ${dot}
       <div style="min-width:0">
-        <div style="font-size:12px;font-weight:500;color:${e.color}">${e.title}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:1px">
+        <div class="activity-title" style="color:${e.color}">${e.title}</div>
+        <div class="activity-sub">
           ${e.detail} · ${ts}
         </div>
       </div>
