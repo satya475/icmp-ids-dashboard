@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Organization Overview — PingGuard</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+.buildings-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+  gap:16px
+}
+.building-card {
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;overflow:hidden;cursor:pointer;
+  transition:border-color .2s
+}
+.building-card:hover { border-color:var(--blue) }
+.building-card.offline { opacity:.6 }
+.b-header {
+  padding:14px 16px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between
+}
+.b-name {
+  font-size:14px;font-weight:600;display:flex;
+  align-items:center;gap:8px
+}
+.b-status-dot {
+  width:9px;height:9px;border-radius:50%;flex-shrink:0
+}
+.dot-online  { background:var(--up);animation:pulse 2s infinite }
+.dot-offline { background:var(--muted) }
+.dot-warn    { background:var(--warn);animation:pulse 2s infinite }
+.b-score {
+  font-size:22px;font-weight:700
+}
+.b-body { padding:14px 16px }
+.b-stats {
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:8px;margin-bottom:12px
+}
+.b-stat { text-align:center }
+.b-stat .n {
+  font-size:18px;font-weight:700;line-height:1
+}
+.b-stat .l {
+  font-size:9px;color:var(--muted);
+  text-transform:uppercase;margin-top:3px
+}
+.b-chart-wrap { height:60px;position:relative }
+.b-devices {
+  margin-top:10px;max-height:160px;overflow-y:auto
+}
+.b-device-row {
+  display:flex;align-items:center;gap:8px;
+  padding:5px 0;border-bottom:1px solid var(--border);
+  font-size:11px
+}
+.b-device-row:last-child { border-bottom:none }
+.status-dot {
+  width:7px;height:7px;border-radius:50%;flex-shrink:0
+}
+.org-stats {
+  display:grid;grid-template-columns:repeat(5,1fr);
+  gap:12px;margin-bottom:20px
+}
+.last-seen { font-size:10px;color:var(--muted) }
+.router-row {
+  background:rgba(59,130,246,.06);
+  border-radius:4px;padding:2px 4px
+}
+.offline-msg {
+  text-align:center;padding:20px;color:var(--muted);
+  font-size:12px
+}
+@keyframes pulse {
+  0%,100%{opacity:1}50%{opacity:.4}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <span class="dot-live"></span>
+    PingGuard — Organization Overview
+  </h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <a href="/" class="nav-link">← Dashboard</a>
+    <span id="last-update"
+          style="font-size:11px;color:var(--muted)">
+      Loading...
+    </span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Organization summary -->
+  <div class="org-stats">
+    <div class="stat">
+      <div class="lbl">Buildings</div>
+      <div class="val c-blue" id="org-buildings">—</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Online Now</div>
+      <div class="val c-up" id="org-online">—</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Offline</div>
+      <div class="val c-down" id="org-offline">—</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Total Devices</div>
+      <div class="val c-blue" id="org-devices">—</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Avg Health</div>
+      <div class="val" id="org-health">—</div>
+    </div>
+  </div>
+
+  <!-- Buildings grid -->
+  <div class="buildings-grid" id="buildings-grid">
+    <div style="color:var(--muted);font-size:13px;
+                padding:40px;text-align:center;
+                grid-column:1/-1">
+      Loading buildings...
+    </div>
+  </div>
+
+  <!-- Setup instructions (shown when no agents) -->
+  <div class="card" id="setup-guide" style="display:none">
+    <div class="ch">How to Add a Building</div>
+    <div class="cb">
+      <p style="color:var(--muted);font-size:13px;
+                 margin-bottom:16px">
+        No agents connected yet. Share these instructions
+        with your teammates at each building:
+      </p>
+      <div style="background:#0a0c14;border-radius:8px;
+                  padding:16px;font-family:monospace;
+                  font-size:12px;color:#22c55e;
+                  line-height:2">
+        <div style="color:#64748b"># Step 1 — Install Python
+             (python.org)</div>
+        <div style="color:#64748b"># Step 2 — Install agent
+             dependencies</div>
+        pip install icmplib requests colorama scapy<br>
+        <br>
+        <div style="color:#64748b"># Step 3 — Run agent
+             (as Administrator)</div>
+        python agent.py
+        --server <span style="color:#f59e0b"
+          id="server-url">https://your-tunnel-url.com
+        </span>
+        --location <span style="color:#f59e0b">
+          "Building Name"</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const api  = url => fetch(url).then(r => r.json());
+const COLS = ['#3b82f6','#22c55e','#f59e0b',
+              '#ef4444','#a855f7','#06b6d4'];
+
+// Store chart instances
+const _charts = {};
+
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  if (b >= 1e9) return (b/1e9).toFixed(1)+' GB';
+  if (b >= 1e6) return (b/1e6).toFixed(1)+' MB';
+  if (b >= 1e3) return (b/1e3).toFixed(1)+' KB';
+  return b+' B';
+}
+
+function fmtRtt(r) {
+  return r ? r.toFixed(1)+'ms' : '—';
+}
+
+function scoreColor(s) {
+  if (!s) return 'var(--muted)';
+  if (s >= 90) return 'var(--up)';
+  if (s >= 70) return 'var(--blue)';
+  if (s >= 50) return 'var(--warn)';
+  return 'var(--down)';
+}
+
+function timeSince(ts) {
+  if (!ts) return 'never';
+  const diff = (Date.now() - new Date(ts)) / 1000;
+  if (diff < 60)   return `${Math.round(diff)}s ago`;
+  if (diff < 3600) return `${Math.round(diff/60)}m ago`;
+  return `${Math.round(diff/3600)}h ago`;
+}
+
+function buildingCard(b) {
+  const online  = b.is_online === 1;
+  const health  = b.health;
+  const score   = health?.health_score;
+  const sColor  = scoreColor(score);
+  const dotCls  = online
+    ? (score < 60 ? 'dot-warn' : 'dot-online')
+    : 'dot-offline';
+
+  // Router info
+  const router = b.devices?.find(d => d.is_router);
+  const rUp    = router?.is_alive;
+  const rRtt   = router?.rtt_avg_ms;
+
+  // Device counts
+  const total  = health?.devices_total || 0;
+  const up     = health?.devices_up    || 0;
+  const down   = health?.devices_down  || 0;
+
+  // Bandwidth
+  const bwIn   = health?.bandwidth_in  || 0;
+  const bwOut  = health?.bandwidth_out || 0;
+
+  return `
+  <div class="building-card ${online?'':'offline'}"
+       onclick="toggleDevices('${b.agent_id}')">
+
+    <div class="b-header">
+      <div class="b-name">
+        <span class="b-status-dot ${dotCls}"></span>
+        ${b.location}
+        ${!online ? '<span style="font-size:10px;color:var(--muted);font-weight:400"> — offline</span>' : ''}
+      </div>
+      <div class="b-score" style="color:${sColor}">
+        ${score ? Math.round(score) : '—'}
+        <span style="font-size:11px;color:var(--muted);font-weight:400">/100</span>
+      </div>
+    </div>
+
+    <div class="b-body">
+      <!-- Stats row -->
+      <div class="b-stats">
+        <div class="b-stat">
+          <div class="n" style="color:${rUp?'var(--up)':'var(--down)'}">
+            ${online ? (rUp?'UP':'DOWN') : '—'}
+          </div>
+          <div class="l">Router</div>
+        </div>
+        <div class="b-stat">
+          <div class="n">${online ? fmtRtt(rRtt) : '—'}</div>
+          <div class="l">RTT</div>
+        </div>
+        <div class="b-stat">
+          <div class="n">
+            <span style="color:var(--up)">${up}</span>
+            <span style="color:var(--muted);font-size:12px">/${total}</span>
+          </div>
+          <div class="l">Devices</div>
+        </div>
+        <div class="b-stat">
+          <div class="n" style="font-size:13px">
+            ${fmtBytes(bwIn)}
+          </div>
+          <div class="l">↓ Bandwidth</div>
+        </div>
+      </div>
+
+      <!-- Mini health trend chart -->
+      ${b.trend?.length > 1 ? `
+      <div class="b-chart-wrap">
+        <canvas id="chart-${b.agent_id}"></canvas>
+      </div>` : ''}
+
+      <!-- Last seen -->
+      <div class="last-seen" style="margin-top:8px">
+        ${online
+          ? `Reporting every 30s`
+          : `Last seen: ${timeSince(b.last_seen)}`}
+        · ${b.subnet || ''}
+      </div>
+
+      <!-- Devices list (hidden by default) -->
+      <div class="b-devices" id="devices-${b.agent_id}"
+           style="display:none">
+        <div style="font-size:10px;color:var(--muted);
+                    text-transform:uppercase;
+                    letter-spacing:.06em;
+                    padding:8px 0 4px;font-weight:600">
+          Devices
+        </div>
+        ${(b.devices||[]).map(d => `
+          <div class="b-device-row
+            ${d.is_router ? 'router-row' : ''}">
+            <span class="status-dot" style="background:${
+              d.is_alive
+                ? 'var(--up)'
+                : 'var(--down)'}"></span>
+            <span style="flex:1;font-weight:${
+              d.is_router?'600':'400'}">
+              ${d.name || d.ip}
+              ${d.is_router
+                ? '<span style="color:var(--blue);font-size:9px;margin-left:4px">ROUTER</span>'
+                : ''}
+            </span>
+            <span style="font-family:monospace;
+                          color:var(--muted)">
+              ${d.ip}
+            </span>
+            <span style="color:${d.is_alive?'var(--up)':'var(--muted)'}">
+              ${d.rtt_avg_ms
+                ? d.rtt_avg_ms.toFixed(1)+'ms'
+                : (d.is_alive ? '—' : 'DOWN')}
+            </span>
+          </div>`).join('')}
+      </div>
+
+    </div>
+  </div>`;
+}
+
+function toggleDevices(agentId) {
+  const el = document.getElementById(`devices-${agentId}`);
+  if (el) {
+    el.style.display =
+      el.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function drawMiniChart(agentId, trend) {
+  const canvas = document.getElementById(`chart-${agentId}`);
+  if (!canvas || !trend?.length) return;
+
+  // Destroy previous chart if exists
+  if (_charts[agentId]) {
+    _charts[agentId].destroy();
+  }
+
+  _charts[agentId] = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: trend.map(() => ''),
+      datasets: [{
+        data:            trend.map(t => t.health_score||0),
+        borderColor:     '#3b82f6',
+        backgroundColor: '#3b82f620',
+        borderWidth:     1.5,
+        pointRadius:     0,
+        tension:         0.3,
+        fill:            true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          display: false,
+          min: 0, max: 100
+        }
+      }
+    }
+  });
+}
+
+function updateOrgStats(buildings) {
+  const online  = buildings.filter(b => b.is_online).length;
+  const offline = buildings.length - online;
+  const devices = buildings.reduce(
+    (s,b) => s + (b.health?.devices_total||0), 0);
+  const scores  = buildings
+    .filter(b => b.health?.health_score)
+    .map(b => b.health.health_score);
+  const avgH = scores.length
+    ? Math.round(scores.reduce((a,b)=>a+b)/scores.length)
+    : null;
+
+  document.getElementById('org-buildings').textContent =
+    buildings.length;
+  document.getElementById('org-online').textContent  = online;
+  document.getElementById('org-offline').textContent = offline;
+  document.getElementById('org-devices').textContent = devices;
+
+  const hEl = document.getElementById('org-health');
+  hEl.textContent  = avgH ? avgH+'/100' : '—';
+  hEl.style.color  = scoreColor(avgH);
+}
+
+async function refresh() {
+  try {
+    const buildings = await api('/api/buildings');
+
+    if (!buildings.length) {
+      document.getElementById('setup-guide')
+        .style.display = 'block';
+      document.getElementById('buildings-grid')
+        .innerHTML = '';
+      // Show current server URL
+      document.getElementById('server-url')
+        .textContent = window.location.origin;
+      return;
+    }
+
+    document.getElementById('setup-guide')
+      .style.display = 'none';
+
+    updateOrgStats(buildings);
+
+    const grid = document.getElementById('buildings-grid');
+
+    // Remember which devices panels are open
+    const openPanels = new Set();
+    document.querySelectorAll('.b-devices').forEach(el => {
+      if (el.style.display !== 'none') {
+        openPanels.add(el.id.replace('devices-', ''));
+      }
+    });
+
+    grid.innerHTML = buildings
+      .map(b => buildingCard(b)).join('');
+
+    // Draw mini charts
+    buildings.forEach(b => {
+      if (b.trend?.length > 1) {
+        drawMiniChart(b.agent_id, b.trend);
+      }
+      // Restore open panels
+      if (openPanels.has(b.agent_id)) {
+        const el = document.getElementById(
+          `devices-${b.agent_id}`);
+        if (el) el.style.display = 'block';
+      }
+    });
+
+    document.getElementById('last-update').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+
+  } catch(e) {
+    console.error('Error:', e);
+  }
+}
+
+// Initial load + refresh every 30 seconds
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

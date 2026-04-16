@@ -188,6 +188,10 @@ def run_dashboard():
     async def degradation(request: Request):
         return templates.TemplateResponse(
             "degradation.html", {"request": request})
+    @app.get("/buildings", response_class=HTMLResponse)
+    async def buildings(request: Request):
+        return templates.TemplateResponse(
+            "buildings.html", {"request": request})
 
     print(f"\n  PingGuard v2.0 — FastAPI")
     print(f"  -------------------------")
@@ -244,4 +248,4 @@ if __name__ == "__main__":
     elif args.bandwidth:
         run_bandwidth()
     else:
-        run_dashboard()
+        run_dashboard() 

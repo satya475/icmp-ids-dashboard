@@ -660,3 +660,273 @@ async def device_rename(request: Request):
         return js({"ok": True, "msg": f"Renamed to {name}"})
     except Exception as e:
         return js({"ok": False, "msg": str(e)})
+    
+
+# ── Agent / Multi-Building ─────────────────
+
+@router.post("/api/agent/report")
+async def agent_report(request: Request):
+    """
+    Receive monitoring data from remote building agents.
+    Called every 30 seconds by each agent.
+    """
+    try:
+        from db.database import get_connection
+        from config import DB_FILE
+        data = await request.json()
+
+        agent_id = data.get("agent_id", "unknown")
+        location = data.get("location", "Unknown")
+        building = data.get("building", location)
+        subnet   = data.get("subnet",   "unknown")
+        router_ip= data.get("router_ip","unknown")
+        results  = data.get("results",  [])
+        bw_data  = data.get("bandwidth", [])
+        now      = datetime.now().isoformat()
+
+        conn = get_connection(DB_FILE)
+
+        # Register / update agent
+        conn.execute("""INSERT INTO agents
+            (agent_id, location, building, subnet,
+             router_ip, last_seen, first_seen, is_online)
+            VALUES (?,?,?,?,?,?,?,1)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                location  = excluded.location,
+                building  = excluded.building,
+                subnet    = excluded.subnet,
+                router_ip = excluded.router_ip,
+                last_seen = excluded.last_seen,
+                is_online = 1""",
+            (agent_id, location, building,
+             subnet, router_ip, now, now))
+
+        # Save probe results
+        for r in results:
+            conn.execute("""INSERT INTO agent_results
+                (agent_id, location, ip, name, is_alive,
+                 rtt_avg_ms, packet_loss, quality,
+                 is_router, timestamp)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (agent_id, location,
+                 r.get("ip"),
+                 r.get("name", r.get("ip")),
+                 int(r.get("is_alive", 0)),
+                 r.get("rtt_avg_ms"),
+                 r.get("packet_loss", 0),
+                 r.get("quality", "unknown"),
+                 int(r.get("is_router", 0)),
+                 r.get("timestamp", now)))
+
+        # Save bandwidth data
+        for b in bw_data:
+            conn.execute("""INSERT INTO agent_bandwidth
+                (agent_id, location, ip,
+                 bytes_in, bytes_out, timestamp)
+                VALUES (?,?,?,?,?,?)""",
+                (agent_id, location,
+                 b.get("ip"),
+                 b.get("bytes_in", 0),
+                 b.get("bytes_out", 0),
+                 now))
+
+        # Calculate and save building health snapshot
+        if results:
+            total    = len(results)
+            up       = sum(1 for r in results
+                          if r.get("is_alive"))
+            down     = total - up
+            rtts     = [r["rtt_avg_ms"] for r in results
+                       if r.get("rtt_avg_ms")]
+            avg_rtt  = sum(rtts)/len(rtts) if rtts else None
+            losses   = [r.get("packet_loss",0)
+                       for r in results]
+            avg_loss = sum(losses)/len(losses) if losses else 0
+
+            # Router specific
+            router   = next((r for r in results
+                            if r.get("is_router")), None)
+            r_status = "UP" if (router and
+                router.get("is_alive")) else "DOWN"
+            r_rtt    = router.get("rtt_avg_ms") if router else None
+
+            # Health score calculation
+            rtt_s  = _agent_score_rtt(avg_rtt)
+            loss_s = _agent_score_loss(avg_loss * 100)
+            dev_s  = (up/total*100) if total > 0 else 50
+            health = round(rtt_s*0.40 +
+                          loss_s*0.40 +
+                          dev_s*0.20, 1)
+
+            # Total bandwidth
+            total_bw_in  = sum(b.get("bytes_in",0)
+                              for b in bw_data)
+            total_bw_out = sum(b.get("bytes_out",0)
+                              for b in bw_data)
+
+            conn.execute("""INSERT INTO building_health
+                (agent_id, location, timestamp,
+                 health_score, router_status, router_rtt,
+                 devices_total, devices_up, devices_down,
+                 avg_rtt, packet_loss,
+                 bandwidth_in, bandwidth_out)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (agent_id, location, now,
+                 health, r_status, r_rtt,
+                 total, up, down,
+                 avg_rtt, avg_loss,
+                 total_bw_in, total_bw_out))
+
+        conn.commit()
+        conn.close()
+
+        return js({"ok": True,
+                   "received": len(results),
+                   "agent":    agent_id})
+
+    except Exception as e:
+        return js({"ok": False, "error": str(e)})
+
+
+def _agent_score_rtt(rtt):
+    if rtt is None:  return 50.0
+    if rtt < 5:      return 100.0
+    if rtt < 20:     return 90.0
+    if rtt < 50:     return 80.0
+    if rtt < 100:    return 65.0
+    if rtt < 150:    return 45.0
+    return 20.0
+
+def _agent_score_loss(loss_pct):
+    if loss_pct is None: return 50.0
+    if loss_pct == 0:    return 100.0
+    if loss_pct < 1:     return 90.0
+    if loss_pct < 5:     return 65.0
+    if loss_pct < 10:    return 40.0
+    return 10.0
+
+
+@router.get("/api/buildings")
+def get_buildings():
+    """
+    Get all buildings with their current status.
+    Marks agents offline if not seen in last 2 minutes.
+    """
+    try:
+        from db.database import get_connection
+        from config import DB_FILE
+        conn = get_connection(DB_FILE)
+
+        # Mark agents offline if not seen recently
+        conn.execute("""UPDATE agents SET is_online=0
+            WHERE last_seen < datetime('now', '-2 minutes')""")
+        conn.commit()
+
+        agents = conn.execute(
+            "SELECT * FROM agents ORDER BY location"
+        ).fetchall()
+
+        result = []
+        for a in agents:
+            a = dict(a)
+
+            # Latest health snapshot
+            health = conn.execute("""
+                SELECT * FROM building_health
+                WHERE agent_id=?
+                ORDER BY timestamp DESC LIMIT 1
+            """, (a["agent_id"],)).fetchone()
+
+            # Latest device list
+            devices = conn.execute("""
+                SELECT * FROM agent_results ar
+                WHERE agent_id=? AND timestamp=(
+                    SELECT MAX(timestamp)
+                    FROM agent_results
+                    WHERE agent_id=? AND ip=ar.ip)
+                ORDER BY is_router DESC, ip ASC
+            """, (a["agent_id"], a["agent_id"])).fetchall()
+
+            # Health trend (last 20 snapshots)
+            trend = conn.execute("""
+                SELECT timestamp, health_score
+                FROM building_health
+                WHERE agent_id=?
+                ORDER BY timestamp DESC LIMIT 20
+            """, (a["agent_id"],)).fetchall()
+
+            a["health"]  = dict(health) if health else None
+            a["devices"] = [dict(d) for d in devices]
+            a["trend"]   = [dict(t) for t in reversed(trend)]
+            result.append(a)
+
+        conn.close()
+        return js(result)
+
+    except Exception as e:
+        return js({"error": str(e)})
+
+
+@router.get("/api/buildings/{agent_id}/devices")
+def building_devices(agent_id: str):
+    """Get all devices for a specific building."""
+    try:
+        from db.database import get_connection
+        from config import DB_FILE
+        conn = get_connection(DB_FILE)
+        rows = conn.execute("""
+            SELECT ar.* FROM agent_results ar
+            WHERE ar.agent_id=?
+              AND ar.timestamp = (
+                SELECT MAX(timestamp) FROM agent_results
+                WHERE agent_id=? AND ip=ar.ip)
+            ORDER BY is_router DESC, ip ASC
+        """, (agent_id, agent_id)).fetchall()
+        conn.close()
+        return js([dict(r) for r in rows])
+    except Exception as e:
+        return js({"error": str(e)})
+
+
+@router.get("/api/buildings/{agent_id}/bandwidth")
+def building_bandwidth(agent_id: str):
+    """Get bandwidth history for a building."""
+    try:
+        from db.database import get_connection
+        from config import DB_FILE
+        conn = get_connection(DB_FILE)
+        rows = conn.execute("""
+            SELECT timestamp,
+                   SUM(bytes_in)  as total_in,
+                   SUM(bytes_out) as total_out
+            FROM agent_bandwidth
+            WHERE agent_id=?
+              AND timestamp > datetime('now', '-2 hours')
+            GROUP BY timestamp
+            ORDER BY timestamp ASC
+        """, (agent_id,)).fetchall()
+        conn.close()
+        return js([dict(r) for r in rows])
+    except Exception as e:
+        return js({"error": str(e)})
+
+
+@router.get("/api/buildings/{agent_id}/health-history")
+def building_health_history(agent_id: str):
+    """Get health score history for a building."""
+    try:
+        from db.database import get_connection
+        from config import DB_FILE
+        conn = get_connection(DB_FILE)
+        rows = conn.execute("""
+            SELECT timestamp, health_score,
+                   router_status, devices_up,
+                   devices_total, avg_rtt
+            FROM building_health
+            WHERE agent_id=?
+            ORDER BY timestamp DESC LIMIT 100
+        """, (agent_id,)).fetchall()
+        conn.close()
+        return js([dict(r) for r in reversed(rows)])
+    except Exception as e:
+        return js({"error": str(e)})
