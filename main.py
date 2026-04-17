@@ -61,6 +61,33 @@ def _run_health_in_background():
     t.name = "health-engine"
     t.start()
 
+def _run_ids_in_background():
+    """Start IDS packet capture in background thread."""
+    import threading
+
+    def ids_loop():
+        import time
+        # Small delay to let dashboard start first
+        time.sleep(5)
+        try:
+            from ids.capture import start_capture
+            from ids.engine.decision import process_packet
+            from ids.alerts import handle_alert
+
+            def on_packet(features):
+                process_packet(features, on_alert=handle_alert)
+
+            print("  [IDS] Hybrid IDS started — monitoring all traffic...")
+            print("  [IDS] Signature IDS + ML IDS active")
+
+            start_capture(callback=on_packet, count=0)
+
+        except Exception as e:
+            print(f"  [IDS ERROR] {e}")
+
+    t = threading.Thread(target=ids_loop, daemon=True)
+    t.name = "hybrid-ids"
+    t.start()
 
 def _run_device_health_in_background():
     import threading, time
@@ -130,6 +157,7 @@ def run_dashboard():
 
     from core.ml_engine import start_ml_engine
     start_ml_engine()
+    _run_ids_in_background()
 
     # Create FastAPI app
     app = FastAPI(
@@ -188,10 +216,6 @@ def run_dashboard():
     async def degradation(request: Request):
         return templates.TemplateResponse(
             "degradation.html", {"request": request})
-    @app.get("/buildings", response_class=HTMLResponse)
-    async def buildings(request: Request):
-        return templates.TemplateResponse(
-            "buildings.html", {"request": request})
 
     print(f"\n  PingGuard v2.0 — FastAPI")
     print(f"  -------------------------")
@@ -248,4 +272,4 @@ if __name__ == "__main__":
     elif args.bandwidth:
         run_bandwidth()
     else:
-        run_dashboard() 
+        run_dashboard()
