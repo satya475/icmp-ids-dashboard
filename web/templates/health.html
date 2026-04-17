@@ -81,9 +81,8 @@
           </div>
         </div>
         <div class="dim-bars" style="margin-top:16px" id="current-dims"></div>
-        <div style="margin-top:14px;padding:10px 14px;border-radius:8px;
-                    background:var(--surface2);border:1px solid var(--border)"
-             id="trend-box" style="display:none">
+        <div id="trend-box" style="margin-top:14px;padding:10px 14px;border-radius:8px;
+                    background:var(--surface2);border:1px solid var(--border);display:none">
           <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Trend (last 20 snapshots)</div>
           <div style="display:flex;gap:16px;font-size:12px">
             <span>Direction: <b id="trend-dir">—</b></span>
@@ -470,8 +469,12 @@ async function showComparison(){
           'Small difference — both routers performing similarly.'}
       </div>`;
   } else {
-    banner.style.display=winner?'block':'none';
-    if(!winner) banner.innerHTML='Both routers have equal performance scores.';
+    banner.style.display='block';
+    banner.style.background='rgba(59,130,246,.05)';
+    banner.style.borderColor='var(--border)';
+    banner.innerHTML=winner
+      ?`Both routers are performing similarly right now (${diff.toFixed(0)} point difference).`
+      :'Both routers have equal performance scores.';
   }
 
   document.getElementById('compare-panel').scrollIntoView({behavior:'smooth'});
