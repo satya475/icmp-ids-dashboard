@@ -500,4 +500,5 @@ Open http://localhost:5000 — enter your router IP and click Start.
 
 ### Note
 The database (`network_monitor.db`) is not included in the repo intentionally.
-`setup.py` creates a fresh one for your network automatically.
+`setup.py` creates a fresh one for your network automatically.#   i c m p - N M S  
+ 
